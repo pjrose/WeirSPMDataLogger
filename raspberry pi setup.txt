@@ -1,0 +1,315 @@
+
+
+1. Create a sd card with jesse lite image
+2. Boot up the pi with the image, then ssh to the pi, login as pi, raspberry
+sudo raspi-config
+	change password Weirspm1
+	internationalization options, setup keyboard as English (US)
+	advanced options, enable i2c and serial port (disable console login through serial port though)
+reboot
+
+3. Update the pi libraries and binaries to the latest versions:
+> sudo su
+> apt-get update
+> apt-get upgrade (takes about 24 minutes)
+> reboot 
+
+3a. Setup static IP (https://wiki.archlinux.org/index.php/Dhcpcd)
+
+sudo nano /etc/dhcpcd.conf 
+
+#add these lines to end of file:
+
+	interface eth0
+	static ip_address=192.168.10.1/20
+	static routers=192.168.0.1
+	static domain_name_servers=8.8.8.8 8.8.4.4 2001:558:feed::1 2001:558:feed::2
+
+
+
+4. Remove GUI and unnecessary services:
+
+sudo apt-get remove --purge wolfram-engine triggerhappy cron logrotate dbus dphys-swapfile xserver-common lightdm fake-hwclock cups-common x11-* alsa-base alsa-utils gstreamer1.0-alsa:armhf gstreamer1.0-libav:armhf gstreamer1.0-omx gstreamer1.0-plugins-base:armhf gstreamer1.0-plugins-good:armhf gstreamer1.0-x:armhf
+sudo apt-get clean
+sudo apt-get autoclean
+sudo apt-get autoremove
+sudo apt-get remove python3-serial
+
+sudo apt-get install python3 python3-pip python3-rpi.gpio
+sudo python3 -m pip install pyserial --upgrade
+
+#check that right version was installed, should be 3.0.1 or higher
+
+python3 -m pip freeze | grep pyserial
+
+#copy the datacollection script to the pi home directory
+
+4a. UPS setup
+
+sudo apt-get install python-serial python-rpi.gpio python-smbus i2c-tools
+
+sudo nano /etc/modules
+
+#Add the following lines at the end of the file:
+
+i2c-bcm2708
+i2c-dev
+rtc-ds1307
+
+# get the ups scripts, in pi home directory:
+
+wget http://www.pimodules.com/_zip/UPS_PIco_Supporting_Files.zip
+unzip UPS_PIco_Supporting_Files.zip
+
+#test comms with
+sudo python pico_status.py
+
+sudo nano /etc/rc.local
+#add this line before exit 0
+
+python /home/pi/picofssd.py &
+
+5. Install some useful/necessary utilities:
+sudo apt-get install screen ppp usbmount resolvconf git minicom raspi-config
+ 
+7. Install UMTSKeeper:
+# Go to your home directory (cd ~) and execute these commands to install umtskeeper:
+       mkdir umtskeeper
+       cd umtskeeper
+wget "http://mintakaconciencia.net/squares/umtskeeper/src/umtskeeper.tar.gz"
+       tar -xzvf umtskeeper.tar.gz
+       chmod +x sakis3g umtskeeper
+
+8. Compile newest version of sakis3g with built in usb_modeswitch binary included:
+
+#delete the script included with umtskeeper
+rm ./sakis3g 
+
+#get dependency and set up symlink for compile
+sudo apt-get install libusb-1.0-0-dev
+sudo ln -s /usr/include/libusb-1.0/libusb.h /usr/include/libusb.h 
+
+#get newest source code of sakis3g
+
+git clone https://github.com/Trixarian/sakis3g-source.git 
+cd sakis3g-source 
+./compile 
+(from sakis3g unzip directory)
+sudo cp ./build/sakis3gz /home/pi/umtskeeper/sakis3g 
+sudo cp ./build/usb_modeswitch /home/pi/umtskeeper/usb_modeswitch
+sudo cp ./build/sakis3gz /home/pi/umtskeeper/sakis3g 
+sudo cp ./build/switchconfig /home/pi/umtskeeper/switchconfig
+
+sudo chmod +x /home/pi/umtskeeper/sakis3g 
+sudo chmod +x /home/pi/umtskeeper/usb_modeswitch
+sudo chmod +x /home/pi/umtskeeper/switchconfig
+
+
+9. Try to get 3g internet access:
+sudo ./sakis3g --interactive
+#Enter '0' for custom apn (or 'broadband'),'0' for  password and username.
+#If successfully connected, check that umtskeeper can successfully connect to the internet:
+
+sudo ./umtskeeper --sakisoperators "USBINTERFACE='0' OTHER='USBMODEM' USBMODEM='12d1:1506' APN='CUSTOM_APN' CUSTOM_APN='broadband' APN_USER='0' APN_PASS='0'" --sakisswitches "--sudo --console" --devicename 'Huawei' --log --nat 'no'
+
+10. Set up read-only filesystem
+
+# add " fastboot noswap ro" to the end of /boot/cmdline.txt. The file should look like this: 
+sudo nano /boot/cmdline.txt
+#for disabled serial port login:
+dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait fastboot noswap ro
+
+
+ 
+#move some symlinks to the tempfs mounts:
+sudo su
+rm -rf /var/run
+ln -s /run /var/run
+rm -rf /var/lock
+ln -s /run/lock /var/lock
+rm -rf /var/spool
+ln -s /tmp /var/spool
+
+
+
+#edit fstab by adding ‘ro to /dev/mmcblk*’ and bottom 3 lines):
+
+sudo nano /etc/fstab 
+
+proc            /proc           proc    defaults             0       0
+/dev/mmcblk0p1  /boot           vfat    defaults,ro          0       2
+/dev/mmcblk0p2  /               ext4    defaults,noatime,ro  0       1
+# a swapfile is not a swap partition, no line here
+#   use  dphys-swapfile swap[on|off]  for that
+tmpfs           /var/log        tmpfs   nodev,nosuid         0       0
+tmpfs           /var/tmp        tmpfs   nodev,nosuid         0       0
+tmpfs           /tmp            tmpfs   nodev,nosuid         0       0
+
+sudo reboot
+#you should now have readonly file system! To check, try a ‘touch new.file’ command in your home directory. It should fail because you cannot create or write to the home partition.
+
+#to temporarily enable write access (i.e. change a setting or modify a file)
+sudo mount -o remount,rw /
+
+#to reset back to ro mode, reboot or:
+sudo mount -o remount,ro /
+
+10b. Install pigpiod
+
+rm pigpio.zip
+sudo rm -rf PIGPIO
+wget abyz.co.uk/rpi/pigpio/pigpio.zip
+unzip pigpio.zip
+cd PIGPIO
+make -j4
+sudo make install
+
+#unit file for pigpiod
+sudo nano /lib/systemd/system/pigpiod.service
+#file looks like this:
+
+[Unit]
+Description=Gpio daemon
+
+[Service]
+ExecStart=/usr/local/bin/pigpiod
+Type=forking
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+
+#run these commands
+
+sudo systemctl start pigpiod
+sudo systemctl enable pigpiod
+sudo systemctl status pigpiod
+
+11. Setup systemd unit files to launch umtskeeper and python scripts in the background:
+#create a new systemd unit file for our python script
+sudo nano /lib/systemd/system/datacollection.service
+
+#Add the following text :
+[Unit]
+Description=Data collection, logging and upload service
+After=multi-user.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/python3 /home/pi/datacollection.py
+RestartSec=5
+TimeoutSec=30
+Restart=always
+WatchdogSec=150
+
+[Install]
+WantedBy=multi-user.target
+
+
+#If you want to log stdout to a file (we already do this in the script, but just in case it’s not working):
+ExecStart=/usr/bin/python3 /home/pi/datacollection.py > /var/log/datacollection.log 2>&1
+# note that the log will be deleted after reboot because var/log is tempfs as part of the read-only file system setup.
+#set executable permission on the unit file
+sudo chmod 644 /lib/systemd/system/datacollection.service
+
+#configure systemd to use the new unit file
+sudo systemctl daemon-reload
+sudo systemctl enable datacollection.service
+
+
+
+#Do the same for UMTSKeeper unit file:
+sudo nano /lib/systemd/system/umtskeeper.service
+#unit file contents: 
+[Unit]
+Description=UMTS Keeper and Sakis3g
+After=multi-user.target
+
+[Service]
+Type=idle
+ExecStart=/home/pi/umtskeeper/umtskeeper --sakisoperators "USBINTERFACE='0' OTHER='USBMODEM' USBMODEM='12d1:1506' APN='CUSTOM_APN' CUSTOM_APN='broadband' APN_USER='0' APN_PASS='0'" --sakisswitches "--sudo --console" --devicename 'Huawei' --nostats --nat 'no' --httpserver
+RestartSec=5
+TimeoutSec=30
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+
+#make it executable
+chmod 644 /lib/systemd/system/umtskeeper.service
+
+#configure systemd to use the new unit file
+sudo systemctl daemon-reload
+sudo systemctl enable umtskeeper.service
+systemp[sudo reboot
+
+Useful commands:
+
+#check status
+sudo systemctl status datacollection.service -l
+sudo systemctl status umtskeeper.service -l
+#stop python script
+sudo systemctl stop datacollection.service
+sudo systemctl stop umtskeeper.service
+
+# to find the PID of a running process (to kill it, connect screen to it)
+ps aux | less
+#press enter (scroll) until you find the command that started the process (i.e. python3 /home/Documents/start.py)
+#assuming the PID is 439, kill 439 will abort it
+
+#to make a python script callable just by its name, put the interpreter on the first line, including hash tag:
+#!/usr/local/python3
+
+#to correct line endings to unix standard,
+sudo apt-get install dos2unix 
+dos2unix [source file]
+
+#to see logs in real time:
+tail -f /var/log/umtskeeper.log
+tail -f /var/log/datacollection.log
+tail -f /media/usb0/Eventlogs/umtskeeper.log
+
+# to install RTC on UPS Pico (from https://www.raspberrypi.org/forums/viewtopic.php?f=66&t=125003)
+
+#add this to /boot/config.txt
+
+dtoverlay=i2c-rtc,ds1307 
+
+#exit, save
+
+sudo nano /etc/modules
+
+#add these devices to that file, leave a blank line at the end:
+
+i2c-dev
+i2c-bcm2708
+rtc-ds1307
+
+#exit, save
+
+sudo nano /lib/udev/hwclock-set 
+
+#comment out these lines
+
+if [ -e /run/systemd/system ] ; then
+    exit 0
+fi
+
+#exit, save
+sudo reboot
+
+#check that NTP has updated system time
+date
+
+sudo hwclock -w
+#writes the system time to your RTC
+
+sudo hwclock -r
+#reads it back - it should be much the same as from the date command.
+
+sudo hwclock -s
+#writes RTC back to system time. (There are variations on these commands but the OS should take of everything once we are at this stage).
+
+#Reboot and check /var/log/syslog. 
+#If all is working as it should you will now see correct timestamps after the system restarts.
+

@@ -1,0 +1,2 @@
+sudo systemctl stop datacollection
+sudo i2cset -y 1 0x6B 8 0xff
