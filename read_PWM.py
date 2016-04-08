@@ -11,7 +11,7 @@ class reader:
    """
    A class to read oil sensor PWM signals for temperature, level and quality.
    """
-   def __init__(self, pi, gpio, new_data_event):
+   def __init__(self, pi, gpio):
       self.pi = pi
       self.gpio = gpio
       self.new_data_event = new_data_event
@@ -95,8 +95,8 @@ class reader:
          self._quality_duty_cycle = self._qual_high_duration / self._avg_period
          #print('OIL QUALITY DUTY CYCLE = ' + str(self._qual_high_duration / self._avg_period))
 
-         if(self._validate_oil_sensor_readings()):
-            self.new_data_event.set()
+         self._validate_oil_sensor_readings()
+      
       else:
          self._state = self._SYNC
          

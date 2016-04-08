@@ -46,8 +46,22 @@ python3 -m pip freeze | grep pyserial
 
 4a. UPS setup
 
+#disable serial port login
+
+sudo nano /boot/cmdline.txt
+dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait
+
+#eg, remove console=ttyAMA0,115200 and if there, kgdboc=ttyAMA0,115200
+
+sudo systemctl stop serial-getty@ttyAMA0.service
+sudo systemctl disable serial-getty@ttyAMA0.service
+
+#get the necessary tools for i2c communication
+
 sudo apt-get install python-serial python-rpi.gpio python-smbus i2c-tools
 
+
+#tell the pi what i2c devices are on the system, the last one is the pseudo real time clock on the UPS.
 sudo nano /etc/modules
 
 #Add the following lines at the end of the file:
@@ -64,10 +78,25 @@ unzip UPS_PIco_Supporting_Files.zip
 #test comms with
 sudo python pico_status.py
 
+#upgrade firmware (requires RS232 and I2c communication, yellow jumper can be OFF).
+#put in bootloader mode, then run picofu3.py with new firmware file
+
+sudo i2cset -y 1 0x6b 0 0xff 
+sudo python picofu3.py -f UPS_PIco_0x5C_25_02_2016.hex
+
+
+#set the hwclock according to system time:
+sudo hwclock -w
+
+#check it 
+sudo hwclock -r
+
+#get picofssd script to run at startup, add this line before exit 0 in rc.local
+
 sudo nano /etc/rc.local
-#add this line before exit 0
 
 python /home/pi/picofssd.py &
+
 
 5. Install some useful/necessary utilities:
 sudo apt-get install screen ppp usbmount resolvconf git minicom raspi-config
@@ -116,9 +145,13 @@ sudo ./umtskeeper --sakisoperators "USBINTERFACE='0' OTHER='USBMODEM' USBMODEM='
 
 # add " fastboot noswap ro" to the end of /boot/cmdline.txt. The file should look like this: 
 sudo nano /boot/cmdline.txt
-#for disabled serial port login:
+#to disable serial port login (also needed for UPS and/or GPS communication):
+
 dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait fastboot noswap ro
 
+#eg, remove console=ttyAMA0,115200 and if there, kgdboc=ttyAMA0,115200
+sudo systemctl stop serial-getty@ttyAMA0.service
+sudo systemctl disable serial-getty@ttyAMA0.service
 
  
 #move some symlinks to the tempfs mounts:
@@ -312,4 +345,41 @@ sudo hwclock -s
 
 #Reboot and check /var/log/syslog. 
 #If all is working as it should you will now see correct timestamps after the system restarts.
+
+#GPS install
+#GPS uses 3.3v and gnd
+#RX is RX on the pi and TX is TX on the pi, so RX goes to RX and TX goes to TX.
+#Serial port login should already be disabled per UPS setup (and read only file system setup)
+#so type these commands to echo GPS output (GPS outputs data at all times even without fix):
+
+stty -F /dev/ttyAMA0 raw 9600 cs8 clocal -cstopb
+cat /dev/ttyAMA0
+
+#sample output
+$GPGGA,200315.000,3246.1719,N,09717.7598,W,1,06,1.40,176.2,M,-23.6,M,,*56
+$GPGSA,A,3,09,16,23,27,07,08,,,,,,,1.69,1.40,0.96*03
+$GPRMC,200315.000,A,3246.1719,N,09717.7598,W,0.08,90.35,070416,,,A*4C
+$GPVTG,90.35,T,,M,0.08,N,0.14,K,A*0F
+
+#change to rw file system
+sudo mount -o remount,rw /
+sudo apt-get update
+sudo apt-get install gpsd gpsd-clients
+
+#file system ran out of space at this point, to resize
+sudo raspi-config --expand-rootfs
+wget https://github.com/wadda/gps3/archive/master.zip
+mkdir gps3
+unzip ./master.zip -d ./gps3/
+cd ./gps3/gps3-master/
+sudo pip3 install gps3
+sudo systemctl stop gpsd.socket
+sudo systemctl disable gpsd.socket
+sudo gpsd /dev/ttyAMA0 -F /var/run/gpsd.sock
+#the demo should work now
+sudo python3 human.py
+
+#to get borders showing up properly, add "screen bash" in "Connection > SSH > Remote command" in the PuTTY Configuration for my session. 
+
+
 
