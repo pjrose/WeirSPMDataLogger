@@ -28,42 +28,72 @@ import threading, queue
 import requests
 import logging, logging.handlers
 
+from gps3 import gps3
+import gps3_human
+
+
+
+
    
 def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_event):
     #sample data format:
     #data                ,lat,  ,lon     ,el    ,press , tem  , level, qual,rpm
     #2016-03-16T16:15:04Z,32.758,-97.448,199.700,32.808,63.722,26.887,2.144,0.000
    
-    time_format_str = '%Y-%m-%dT%H:%M:%S'
+    time_format_str = '%Y-%m-%dT%H:%M:%SZ'
     
     PWM_GPIO = 4
-    RPM_GPIO = 17    
+    RPM_GPIO = 17 #for reference, the ups uses gpio 22 to shutdown the pi (FSSD) and 27 is use for pulse train    
     
     led_state = 0
-
+    
+    Latitude = '0'
+    Longitude = '0'
+    Altitude = '0'
     
     r = read_RPM.reader(pi, RPM_GPIO)
     p = read_PWM.reader(pi, PWM_GPIO, new_data_event)
+
+    gps_connection = connectGPSd()
    
     while not killer.kill_now:
         try:
-            logging.debug('acquire_data process launched and serial port opened...')
+            logging.debug('acquire_data process launched...')
+            
+            gps_fix = gps3.Fix()
+    
             while not killer.kill_now:
-
                 if(new_data_event.wait(5)):
                     if(killer.kill_now): break
                     new_data_event.clear()
-                    timestr = time.strftime(time_format_str)
-                    timetup = time.strptime(timestr, time_format_str)
+                    sys_timestr = time.strftime(time_format_str)
+                    time_str = sys_timestr
                     
                     ad1_volts = ',{0:.2f},'.format(float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05),"02x")) / 100.0)
+
+                    start = time.time()
                     
-                    #to do, get time stamp and lat/lon/el from GPS                
-                    data_str = timestr + 'Z,' + '32.758,-97.448,199.700' + ad1_volts + p.PWM() + r.RPM()
-                    
+                    for new_data in gps_connection:
+                        if new_data:
+                            gps_fix.refresh(new_data)
+                            
+                            gps_time_str = '{time}'.format(**gps_fix.TPV)
+                            if(gps_time_str is not None and not gps_time_str == 'n/a'):
+                                time_str = gps_time_str.replace('.000','') #strip fractional seconds, which is always .000
+                                Latitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lat'], 'lat', 'RAW')).replace('°','')
+                                Longitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lon'], 'lon', 'RAW')).replace('°','')
+                                Altitude = str(gps_fix.TPV['alt'])
+                            logging.debug('GPS refresh took ' + str(time.time() - start) + ' seconds.')
+                            break
+                               
+                    data_str = time_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + ad1_volts + p.PWM() + r.RPM()
+                    print(data_str)
                     if(len(data_str.split(',')) < 9):
                         logging.debug('Invalid serial data recieved, length < 9 after split on , ACTUAL DATA: ' + data)
                         continue
+                    
+                    timetup = time.strptime(time_str, time_format_str)
+                    
                     filename = time.strftime("%Y-%m-%d_%H.csv", timetup) #change log file every hour
                     main_queue.put(('new data', filename, data_str))
 
@@ -78,6 +108,7 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
             logging.error('acquire_data: ' + traceback.format_exc())
             main_queue.put(('quit',))
         finally:
+            gps_connection.close()
             logging.debug('DAQ thread caught stop signal.')
             try:
                 pi.i2c_write_byte_data(i2c_handle_6b, 0x0D, 0) #turn off the red LED
@@ -91,6 +122,18 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
 
 def keyword_args_to_dict(**kwargs):
     return {k: v for (k,v) in kwargs.items() if v != None}
+
+
+def setHWClock(date_str): #when GPS has a good time but pi does not
+    
+    date_str_format = '%Y-%m-%dT%H:%M:%SZ'
+    timetup = time.strptime(date_str, date_str_format)
+    time.strftime('%Y-%m-%d %H:%M:%S', timetup)
+    
+    os.system('sudo mount -o remount,rw /')
+    os.system('hwclock --set --date %s' % date_str)
+    os.system('sudo mount -o remount,ro /')
+    
     
 def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
     
@@ -237,7 +280,7 @@ def init_logger():
         #create rotating file handler and set level to error
         TEMP_LOG_PATH = os.path.join('/var/log', 'datacollection.log')
         handler = logging.handlers.RotatingFileHandler(TEMP_LOG_PATH, maxBytes = 1048576, backupCount = 4)# keep last 5 MB of logs in 1 MB files
-        handler.setLevel(logging.DEBUG)
+        handler.setLevel(logging.NOTSET)
         formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
@@ -245,7 +288,7 @@ def init_logger():
 
         #create console handler and set level to info
         handler = logging.StreamHandler()
-        handler.setLevel(logging.DEBUG)
+        handler.setLevel(logging.NOTSET)
         formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
@@ -255,7 +298,7 @@ def init_logger():
         #create rotating file handler and set level to error
         EVENT_LOG_PATH = os.path.join(get_Event_Log_Folder_Path(), 'log.out')
         handler = logging.handlers.RotatingFileHandler(EVENT_LOG_PATH, maxBytes = 1048576, backupCount = 4) #keep last 5 MB of logs in 1 MB files
-        handler.setLevel(logging.DEBUG)
+        handler.setLevel(logging.NOTSET)
         formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
@@ -292,9 +335,16 @@ def mainloop(notify, killer):
     b = None
     try:
         global stopping_upload_thread #written in main, read in upload function
-        #debug hang on systemctl stop
-        #pi = launchPigpio()
-        pi = pigpio.pi()
+        pi = connectPiGPIO()
+        STACounterEnabled = False
+        
+        pi.set_pull_up_down(16, pigpio.PUD_UP) #set to pull up by default so a jumper to ground means enable watchdog.
+        if(pi.read(16) == 0):
+            logging.info('STACounter jumper (GPIO 16 to GND) is installed')
+            STACounterEnabled = True
+        else:
+            logging.info('STACounter jumper (GPIO 16 to GND) is NOT installed')
+        
         i2c_handle_6b, i2c_handle_69 = open_UPS_i2C_handles(pi)
                 
         previous_filepath = current_log_filepath = None 
@@ -393,8 +443,8 @@ def mainloop(notify, killer):
                             logging.debug('Nothing to upload, skipping check until more data is inserted to the db')
                             db_empty = True
                             
-                     #4. Update the STAcounter (still alive watchdog) on the UPS Pico over i2c
-                    if(i2c_handle_6b >= 0):
+                     #4. Update the STAcounter (still alive watchdog) on the UPS Pico over i2c, only if gpio 16 (pin 36) is jumpered to it's adjacent ground pin, the pull up was configured earlier.
+                    if(STACounterEnabled and i2c_handle_6b >= 0):
                         pi.i2c_write_byte_data(i2c_handle_6b, 0x08, 60) #UPS Pico will initiate a reboot if this line of code is not successfully executed at least once in 60 seconds (it counts down).
                         toggle_val = 1 - toggle_val
                         pi.i2c_write_byte_data(i2c_handle_6b, 0x0C, toggle_val) #toggle the blue LED to visually show we hit the watchdog code
@@ -532,26 +582,55 @@ def systemd_status(address, sock, status):
     message = ("STATUS=%s" % status).encode('utf8')
     return sd_message(address, sock, message)
 
-def launchPigpio(): #launches pigpio daemon using system calls. see http://abyz.co.uk/rpi/pigpio/pigpiod.html
-    os.system('killall pigpiod')
-    time.sleep(1)
-    os.system('pigpiod')
-    
+def connectPiGPIO(): #see http://abyz.co.uk/rpi/pigpio/pigpiod.html
+   
     pi = None #pigpiod connection
+    connected = False
+    begin = time.time()
+    
+    while not connected:
+        try:
+            pi = pigpio.pi() #opens a local connection using defaults to the pigpio daemon we just launched
+            if(pi is not None):
+                connected = True
+                logging.info('Successfully connected to pigpiod')
+                break
+        except:
+            if(time.time() - begin > 10):
+                raise
+            else:
+                pass
+            
+        if(time.time() - begin > 10):
+            raise EnvironmentError('Pigpiod connection timeout.')
+        else:
+            time.sleep(1)
+            
+    return pi
+
+def connectGPSd():  #http://www.catb.org/gpsd/
+    gps_connection = None 
     connected = False
     now = time.time()
     
     while not connected:
-        time.sleep(1)
         try:
-            pi = pigpio.pi() #opens a local connection using defaults to the pigpio daemon we just launched
-            connected = True
-            logging.info('Successfully launched pigpio daemon')
+            gps_connection = gps3.GPSDSocket('127.0.0.1', '2947', 'json', None)
+            if(gps_connection is not None):
+                connected = True
+                logging.info('Successfully connected to gpsd')
+                break
         except:
-            pass
-        if(time.time() - now > 10):
-            break
-    return pi
+            if(time.time() - begin > 10):
+                raise
+            else:
+                pass
+        if(time.time() - begin > 10):
+            raise EnvironmentError('Pigpiod connection timeout.')
+        else:
+            time.sleep(1)
+            
+    return gps_connection
 
 def open_UPS_i2C_handles(pi): #opening i2c handles to UPS Pico LED and watchdog registers, see http://www.modmypi.com/raspberry-pi/breakout-boards/pi-modules/ups-pico for manual
         i2c_handle_6b = pi.i2c_open(1, 0x6B) #i2c bus 1, register 0x6b
@@ -564,12 +643,12 @@ def open_UPS_i2C_handles(pi): #opening i2c handles to UPS Pico LED and watchdog 
         return (i2c_handle_6b, i2c_handle_69)
     
 if __name__ == '__main__':
+    
     killer = Killer()
     init_logger()
     
-    # Get our settings from the environment
     notify = notify_socket()
-    # Validate some in-data
+    
     if not notify[0]:
         logging.error("No notification socket, not launched via systemd?")
 

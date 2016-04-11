@@ -1,0 +1,12 @@
+########################################################
+# Alcatel-sbell ASB TL131 TD-LTE
+
+DefaultVendor= 0x05c6
+DefaultProduct=0x9024
+
+TargetVendor=  0x05c6
+TargetProduct= 0x9025
+
+MessageContent="5553424312345678000000000000061b000000020000000000000000000000"
+
+CheckSuccess=20

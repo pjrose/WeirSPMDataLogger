@@ -1,0 +1,12 @@
+#######################################################
+# Quanta 1K3 LTE
+
+DefaultVendor= 0x0408
+DefaultProduct=0xea25
+
+TargetVendor=  0x0408
+TargetProduct= 0xea26
+
+QuantaMode=1
+
+CheckSuccess=20

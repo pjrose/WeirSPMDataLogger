@@ -39,7 +39,7 @@ class reader:
 
       self.min_RPM = min_RPM
 
-      self._watchdog = 200 # Milliseconds.
+      self._watchdog = 60000/min_RPM # Milliseconds
 
       if weighting < 0.0:
          weighting = 0.0
@@ -102,7 +102,7 @@ if __name__ == "__main__":
    import pigpio
    import read_RPM
 
-   RPM_GPIO = 4
+   RPM_GPIO = 17
    RUN_TIME = 60.0
    SAMPLE_TIME = 2.0
    
@@ -120,7 +120,7 @@ if __name__ == "__main__":
 
       RPM = p.RPM()
      
-      print("RPM={}".format(int(RPM+0.5)))
+      print('RPM= ' + RPM)
 
    p.cancel()
 
