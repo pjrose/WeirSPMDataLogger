@@ -241,7 +241,7 @@ WantedBy=multi-user.target
 ExecStart=/usr/bin/python3 /home/pi/datacollection.py > /var/log/datacollection.log 2>&1
 # note that the log will be deleted after reboot because var/log is tempfs as part of the read-only file system setup.
 #set executable permission on the unit file
-sudo chmod 644 /lib/systemd/system/datacollection.service
+sudo chmod +x /lib/systemd/system/datacollection.service
 
 #configure systemd to use the new unit file
 sudo systemctl daemon-reload
@@ -344,6 +344,9 @@ sudo hwclock -s
 #Reboot and check /var/log/syslog. 
 #If all is working as it should you will now see correct timestamps after the system restarts.
 
+
+#file system ran out of space at this point, to resize 'sudo raspi-config --expand-rootfs' or use instructions in separate text file.
+
 #GPS install
 #GPS uses 3.3v and gnd
 #RX is RX on the pi and TX is TX on the pi, so RX goes to RX and TX goes to TX.
@@ -362,57 +365,49 @@ $GPVTG,90.35,T,,M,0.08,N,0.14,K,A*0F
 #change to rw file system
 sudo mount -o remount,rw /
 sudo apt-get update
-sudo apt-get install gpsd
-sudo systemctl stop gpsd.socket
-sudo systemctl disable gpsd.socket
-sudo gpsd /dev/ttyAMA0 -F /var/run/gpsd.sock
+sudo apt-get install gpsd gpsd-clients
 
-#file system ran out of space at this point, to resize
-sudo raspi-config --expand-rootfs
 
-sudo pip3 install gps3
-
-#the demo should work now
-sudo python3 human.py
-
-#to get borders showing up properly, add "screen bash" in "Connection > SSH > Remote command" in the PuTTY Configuration for my session. 
+#enable the pps signal (not used, but may be used to sync nptd later)
+sudo apt-get install pps-tools
+sudo apt-get install libcap-dev
+sudo mount -o remount,rw /boot/
+sudo nano /boot/config.txt #add at the end of the file:
+    dtoverlay=pps-gpio,gpiopin=4
+sudo mount -o remount,ro /boot/
+sudo nano /etc/modules #Add on a new line
+    pps-gpio
 
 
 #edit /etc/default/gpsd
-
-
 # Default settings for the gpsd init script and the hotplug wrapper.
 
 # Start the gpsd daemon automatically at boot time
 START_DAEMON="true"
 
 # Use USB hotplugging to add new USB devices automatically to the daemon
-USBAUTO="true"
+USBAUTO="false"
 
 # Devices gpsd should collect to at boot time.
 # They need to be read/writeable, either by user gpsd or the group dialout.
-DEVICES="/dev/ttyAMA0"
+DEVICES=""
 
 # Other options you want to pass to gpsd
-GPSD_OPTIONS="-F /var/run/gpsd.sock"
+GPSD_OPTIONS="/dev/ttyAMA0 /dev/pps0"
+GPSD_SOCKET="/var/run/gpsd.sock"
+
+sudo pip3 install gps3
+
+#the demo should work now
+sudo python3 human.py
 
 
-#create system d unit file in /etc/systemd/system/gpsd.service
-way would be to create /etc/systemd/system/gpsd.service with the following content: 
+sudo reboot
+#test using:
+sudo ppstest /dev/pps0
 
-[Unit]
-Description=GPS (Global Positioning System) Daemon
-Requires=gpsd.socket
-# Needed with chrony SOCK refclock
-After=chronyd.service
 
-[Service]
-EnvironmentFile=-/etc/default/gpsd
-EnvironmentFile=-/etc/sysconfig/gpsd
-ExecStart=/usr/sbin/gpsd -N $GPSD_OPTIONS $DEVICES
+#to get borders showing up properly, add "screen bash" in "Connection > SSH > Remote command" in the PuTTY Configuration for my session. 
 
-[Install]
-WantedBy=multi-user.target
-Also=gpsd.socket
 
 

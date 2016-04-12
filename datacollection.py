@@ -42,8 +42,8 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
    
     time_format_str = '%Y-%m-%dT%H:%M:%SZ'
     
-    PWM_GPIO = 4
-    RPM_GPIO = 17 #for reference, the ups uses gpio 22 to shutdown the pi (FSSD) and 27 is use for pulse train    
+    PWM_GPIO = 5
+    RPM_GPIO = 17 #for reference, the ups uses gpio 22 to shutdown the pi (FSSD) and 27 is use for pulse train, 4 is used by the GPS for PPS, STACounter enable on 16
     
     led_state = 0
     
@@ -70,8 +70,7 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     time_str = sys_timestr
                     
                     ad1_volts = ',{0:.2f},'.format(float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05),"02x")) / 100.0)
-
-                    start = time.time()
+                    #start = time.time()
                     
                     for new_data in gps_connection:
                         if new_data:
@@ -83,16 +82,18 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                                 Latitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lat'], 'lat', 'RAW')).replace('°','')
                                 Longitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lon'], 'lon', 'RAW')).replace('°','')
                                 Altitude = str(gps_fix.TPV['alt'])
-                            logging.debug('GPS refresh took ' + str(time.time() - start) + ' seconds.')
+                            #logging.debug('GPS refresh took ' + str(time.time() - start) + ' seconds.')
                             break
-                               
+
+                    timetup = time.strptime(time_str, time_format_str)
+                    
+                    time_str = time.strftime("%Y-%m-%d %H:%M:%S", timetup)
+                    
                     data_str = time_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + ad1_volts + p.PWM() + r.RPM()
-                    print(data_str)
+                    #print(data_str)
                     if(len(data_str.split(',')) < 9):
                         logging.debug('Invalid serial data recieved, length < 9 after split on , ACTUAL DATA: ' + data)
                         continue
-                    
-                    timetup = time.strptime(time_str, time_format_str)
                     
                     filename = time.strftime("%Y-%m-%d_%H.csv", timetup) #change log file every hour
                     main_queue.put(('new data', filename, data_str))
@@ -101,7 +102,7 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     pi.i2c_write_byte_data(i2c_handle_6b, 0x0D, led_state) #toggle the red LED to show data is being processed
                 else:
                     if(not killer.kill_now):
-                        raise TimeoutError('The oil sensor has not returned any data for 5 seconds.')
+                        raise TimeoutError('Stopping beceause the oil sensor has not returned any data for 5 seconds on GPIO ' + str(PWM_GPIO))
                     else:
                         break
         except Exception as ex:
@@ -444,8 +445,9 @@ def mainloop(notify, killer):
                             db_empty = True
                             
                      #4. Update the STAcounter (still alive watchdog) on the UPS Pico over i2c, only if gpio 16 (pin 36) is jumpered to it's adjacent ground pin, the pull up was configured earlier.
-                    if(STACounterEnabled and i2c_handle_6b >= 0):
+                    if(STACounterEnabled):
                         pi.i2c_write_byte_data(i2c_handle_6b, 0x08, 60) #UPS Pico will initiate a reboot if this line of code is not successfully executed at least once in 60 seconds (it counts down).
+                    if(i2c_handle_6b >= 0):
                         toggle_val = 1 - toggle_val
                         pi.i2c_write_byte_data(i2c_handle_6b, 0x0C, toggle_val) #toggle the blue LED to visually show we hit the watchdog code
         
