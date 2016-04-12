@@ -22,7 +22,7 @@ import pigpio, read_RPM, read_PWM
 import os, sys, signal, inspect, platform, traceback
 import serial,  serial.tools.list_ports #see https://learn.adafruit.com/arduino-lesson-17-email-sending-movement-detector/installing-python-and-pyserial for install instructions on windows
 import sqlite3
-import time
+import time, datetime
 import socket
 import threading, queue
 import requests
@@ -31,16 +31,13 @@ import logging, logging.handlers
 from gps3 import gps3
 import gps3_human
 
-
-
-
    
 def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_event):
     #sample data format:
     #data                ,lat,  ,lon     ,el    ,press , tem  , level, qual,rpm
     #2016-03-16T16:15:04Z,32.758,-97.448,199.700,32.808,63.722,26.887,2.144,0.000
    
-    time_format_str = '%Y-%m-%dT%H:%M:%SZ'
+    time_format_str = '%Y-%m-%dT%H:%M:%S.%fZ'
     
     PWM_GPIO = 5
     RPM_GPIO = 17 #for reference, the ups uses gpio 22 to shutdown the pi (FSSD) and 27 is use for pulse train, 4 is used by the GPS for PPS, STACounter enable on 16
@@ -66,36 +63,31 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                 if(new_data_event.wait(5)):
                     if(killer.kill_now): break
                     new_data_event.clear()
-                    sys_timestr = time.strftime(time_format_str)
-                    time_str = sys_timestr
-                    
+                    timestamp = datetime.datetime.now()
+                            
                     ad1_volts = ',{0:.2f},'.format(float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05),"02x")) / 100.0)
-                    #start = time.time()
+                    
                     
                     for new_data in gps_connection:
                         if new_data:
                             gps_fix.refresh(new_data)
-                            
                             gps_time_str = '{time}'.format(**gps_fix.TPV)
                             if(gps_time_str is not None and not gps_time_str == 'n/a'):
-                                time_str = gps_time_str.replace('.000','') #strip fractional seconds, which is always .000
                                 Latitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lat'], 'lat', 'RAW')).replace('°','')
                                 Longitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lon'], 'lon', 'RAW')).replace('°','')
                                 Altitude = str(gps_fix.TPV['alt'])
-                            #logging.debug('GPS refresh took ' + str(time.time() - start) + ' seconds.')
                             break
 
-                    timetup = time.strptime(time_str, time_format_str)
                     
-                    time_str = time.strftime("%Y-%m-%d %H:%M:%S", timetup)
+                    timestamp_str = timestamp.strftime(time_format_str)
                     
-                    data_str = time_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + ad1_volts + p.PWM() + r.RPM()
+                    data_str = timestamp_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + ad1_volts + p.PWM() + r.RPM()
                     #print(data_str)
                     if(len(data_str.split(',')) < 9):
                         logging.debug('Invalid serial data recieved, length < 9 after split on , ACTUAL DATA: ' + data)
                         continue
                     
-                    filename = time.strftime("%Y-%m-%d_%H.csv", timetup) #change log file every hour
+                    filename = timestamp.strftime("%Y-%m-%d_%H.csv") #change log file every hour
                     main_queue.put(('new data', filename, data_str))
 
                     led_state = 1 - led_state
@@ -127,13 +119,15 @@ def keyword_args_to_dict(**kwargs):
 
 def setHWClock(date_str): #when GPS has a good time but pi does not
     
-    date_str_format = '%Y-%m-%dT%H:%M:%SZ'
+    date_str_format = '%Y-%m-%dT%H:%M:%S.%fZ'
     timetup = time.strptime(date_str, date_str_format)
     time.strftime('%Y-%m-%d %H:%M:%S', timetup)
     
     os.system('sudo mount -o remount,rw /')
-    os.system('hwclock --set --date %s' % date_str)
-    os.system('sudo mount -o remount,ro /')
+    try:
+        os.system('hwclock --set --date %s' % date_str)
+    finally:
+        os.system('sudo mount -o remount,ro /')
     
     
 def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
@@ -143,7 +137,7 @@ def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
     url = 'https://api.thingspeak.com/update'
     field_keys = ['field' + str(n) for n in range(1,NUMOFCHANNELS+1)]
     headers = {"Content-type": "application/x-www-form-urlencoded","Accept": "text/plain"}
-    write_key = 'ODZXE1UNTM1825OX' #<--THAT'S TREVER'S TEST CHANNEL, original #WeirTest key: 'ZHHHO6RTJOAHCAYW'
+    write_key =  'ZHHHO6RTJOAHCAYW'#<--FAI's 'WeirTest' channel #'ODZXE1UNTM1825OX' #<--TREVER'S TEST CHANNEL
     post_interval = 15 #seconds between https posts attempts, thingspeak rate limit is 15 seconds
 
     api_keys = {'key':write_key}
