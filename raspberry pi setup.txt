@@ -404,9 +404,44 @@ sudo python3 human.py
 
 sudo reboot
 #test using:
+
 sudo ppstest /dev/pps0
 
+#The supplied version of NTPD on the Raspberry Pi may not support PPS so we need to recompile it (Please note that the configure and compile steps may take up to 30 minutes on older Raspberry Pi models).  The latest version is 4.2.8p6, by the way.
 
+wget http://archive.ntp.org/ntp4/ntp-4.2/ntp-4.2.8p6.tar.gz
+tar zxvf ntp-4.2.8p6.tar.gz
+cd ntp-4.2.8p6
+./configure --enable-linuxcaps
+make -j5
+sudo make install
+sudo service ntp stop
+sudo cp /usr/local/bin/ntp* /usr/bin/ && sudo cp /usr/local/sbin/ntp* /usr/sbin/
+sudo nano /etc/ntp.conf 
+
+#edit /etc/ntp.conf, add these lines and 
+
+
+# Kernel-mode PPS reference-clock for the precise seconds
+server 127.127.22.0 minpoll 4 maxpoll 4
+fudge 127.127.22.0 refid kPPS
+
+# Coarse time reference-clock - nearest second, from GPSD mode 28
+server 127.127.28.0 minpoll 4 maxpoll 4 iburst prefer
+fudge 127.127.28.0 time1 +0.105 flag1 1 refid GPSD stratum 1
+
+#amend "prefer" to server 0.debian.pool.ntp.org iburst :
+server 0.debian.pool.ntp.org iburst prefer
+
+sudo service ntp restart
+
+#After several minutes run:
+
+ntpq –pn
+
+if you see oPPS(0) this indicates source selected, Pulse Per Second (PPS) used and everything is working.  To see the version as well, enter:
+
+ntpq -crv -pn
 #to get borders showing up properly, add "screen bash" in "Connection > SSH > Remote command" in the PuTTY Configuration for my session. 
 
 

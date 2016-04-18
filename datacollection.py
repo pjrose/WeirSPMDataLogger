@@ -19,7 +19,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 import pigpio, read_RPM, read_PWM
-import os, sys, signal, inspect, platform, traceback
+import os, subprocess, sys, signal, inspect, platform, traceback
 import serial,  serial.tools.list_ports #see https://learn.adafruit.com/arduino-lesson-17-email-sending-movement-detector/installing-python-and-pyserial for install instructions on windows
 import sqlite3
 import time, datetime
@@ -40,19 +40,26 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
     time_format_str = '%Y-%m-%dT%H:%M:%S.%fZ'
     
     PWM_GPIO = 5
-    RPM_GPIO = 17 #for reference, the ups uses gpio 22 to shutdown the pi (FSSD) and 27 is use for pulse train, 4 is used by the GPS for PPS, STACounter enable on 16
+    RPM_GPIO = 17 #for reference, the ups uses gpio 22 to shutdown the pi (FSSD) and 27 is use for pulse train, 4 is used by the GPS for PPS, STACounter enable on 25
     
     led_state = 0
     
     Latitude = '0'
     Longitude = '0'
     Altitude = '0'
+
+    century_set = False
+    first_call = True
+    
+    last_hwclock_set_time = time.time()
     
     r = read_RPM.reader(pi, RPM_GPIO)
     p = read_PWM.reader(pi, PWM_GPIO, new_data_event)
 
     gps_connection = connectGPSd()
-   
+    
+
+    
     while not killer.kill_now:
         try:
             logging.debug('acquire_data process launched...')
@@ -63,16 +70,34 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                 if(new_data_event.wait(5)):
                     if(killer.kill_now): break
                     new_data_event.clear()
-                    timestamp = datetime.datetime.now()
+                    timestamp = datetime.datetime.utcnow()
                             
                     ad1_volts = ',{0:.2f},'.format(float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05),"02x")) / 100.0)
-                    
-                    
+                                    
                     for new_data in gps_connection:
                         if new_data:
                             gps_fix.refresh(new_data)
                             gps_time_str = '{time}'.format(**gps_fix.TPV)
                             if(gps_time_str is not None and not gps_time_str == 'n/a'):
+                                if(timestamp.year < 2016 or first_call or (time.time() - last_hwclock_set_time) >  28800): #set hwclock on first call and then every 8 hours
+                                    if(timestamp.year < 2016):
+                                        print('year < 2016  '+ str(timestamp.year))
+                                    elif first_call:
+                                        print('first call')
+                                    else:
+                                        print('now: ' + str(time.time()) + ', last hw clock set time: ' + str(last_hwclock_set_time) + ', diff: ' + str((time.time() - last_hwclock_set_time)))
+                                        
+
+                                    first_call = False
+                                    if(timestamp.year <= 1999 and not century_set):
+                                        logging.debug('setCenturyAndReboot would be called now...')
+                                        #setCenturyAndReboot()
+                                        century_set = True
+                                    else:
+                                        logging.debug('setHWClock would be called now...')
+                                        #setHWClock(gps_time_str)
+                                        last_hwclock_set_time = time.time()
+                                    break
                                 Latitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lat'], 'lat', 'RAW')).replace('°','')
                                 Longitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lon'], 'lon', 'RAW')).replace('°','')
                                 Altitude = str(gps_fix.TPV['alt'])
@@ -82,16 +107,19 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     timestamp_str = timestamp.strftime(time_format_str)
                     
                     data_str = timestamp_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + ad1_volts + p.PWM() + r.RPM()
-                    #print(data_str)
+
+                 
+                    
                     if(len(data_str.split(',')) < 9):
                         logging.debug('Invalid serial data recieved, length < 9 after split on , ACTUAL DATA: ' + data)
                         continue
-                    
+
                     filename = timestamp.strftime("%Y-%m-%d_%H.csv") #change log file every hour
                     main_queue.put(('new data', filename, data_str))
 
                     led_state = 1 - led_state
                     pi.i2c_write_byte_data(i2c_handle_6b, 0x0D, led_state) #toggle the red LED to show data is being processed
+                    
                 else:
                     if(not killer.kill_now):
                         raise TimeoutError('Stopping beceause the oil sensor has not returned any data for 5 seconds on GPIO ' + str(PWM_GPIO))
@@ -116,18 +144,25 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
 def keyword_args_to_dict(**kwargs):
     return {k: v for (k,v) in kwargs.items() if v != None}
 
+##def setCenturyAndReboot():
+##    #DOES NOT WORK YET, INVESTIGATING SUBPROCESS MODULE IMPLEMENTATION
+##    logging.info('setCenturyAndReboot - Attempting to set hwclock to current century, then rebooting in order to reinitialize gpsd time estimation.')
+##    os.system('sudo mount -o remount,rw /')
+##    os.system('sudo date -s 2014-01-01') #setting the system time to anything in the current century will get the gpsd to work out the time, but keep it less than 2016 so it still fails the validity check
+##    os.system('sudo hwclock -w') #set hwclock from updated system clock    
+##    logging.info('setCenturyAndReboot - done setting current century, running reboot command...')
+##    os.system('sudo reboot')    
+##
+##def setHWClock(gps_utc_time): #gps time is expected to be YYYY-MM-DDTHH:MM:SS.000Z format.
+##    #DOES NOT WORK YET, INVESTIGATING SUBPROCESS MODULE IMPLEMENTATION
+##    logging.info('setHWClock - Attempting to set hwclock to current gpst time, remounting root in rw.')
+##    os.system('sudo mount -o remount,rw /')
+##    os.system('sudo date -s ' + gps_utc_time)
+##    os.system('sudo hwclock -w') #set hwclock from updated system clock
+##    time.sleep(2)
+##    os.system('sudo mount -o remount,ro /')
+##    logging.info('setHWClock - done setting clock, remounted root as ro.')
 
-def setHWClock(date_str): #when GPS has a good time but pi does not
-    
-    date_str_format = '%Y-%m-%dT%H:%M:%S.%fZ'
-    timetup = time.strptime(date_str, date_str_format)
-    time.strftime('%Y-%m-%d %H:%M:%S', timetup)
-    
-    os.system('sudo mount -o remount,rw /')
-    try:
-        os.system('hwclock --set --date %s' % date_str)
-    finally:
-        os.system('sudo mount -o remount,ro /')
     
     
 def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
@@ -141,7 +176,6 @@ def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
     post_interval = 15 #seconds between https posts attempts, thingspeak rate limit is 15 seconds
 
     api_keys = {'key':write_key}
-
     
     time_of_last_post_attempt = time.time() - post_interval
     session = requests.Session() #allows us to use connection pooling and keepalive as long as an internet connection is available.
@@ -331,14 +365,14 @@ def mainloop(notify, killer):
     try:
         global stopping_upload_thread #written in main, read in upload function
         pi = connectPiGPIO()
-        STACounterEnabled = False
+        STACounterEnabled = True
         
         pi.set_pull_up_down(16, pigpio.PUD_UP) #set to pull up by default so a jumper to ground means enable watchdog.
         if(pi.read(16) == 0):
-            logging.info('STACounter jumper (GPIO 16 to GND) is installed')
-            STACounterEnabled = True
+            logging.info('STACounter jumper (GPIO 16 to GND) is installed, watchdog is disabled.')
+            STACounterEnabled = False
         else:
-            logging.info('STACounter jumper (GPIO 16 to GND) is NOT installed')
+            logging.info('STACounter jumper (GPIO 16 to GND) is NOT installed, watchdog is enabled.')
         
         i2c_handle_6b, i2c_handle_69 = open_UPS_i2C_handles(pi)
                 
@@ -354,7 +388,7 @@ def mainloop(notify, killer):
         base_log_directory = get_CSV_Folder_Path()
 
         
-        logging.info('Launching data acquisition and upload threads...')
+        logging.info('Launching data acquisition and upload threads...')        
         
         a = threading.Thread(target=upload_data_to_thingspeak, args=(upload_queue, main_queue, db_file_path, killer))
         a.daemon = True
@@ -401,6 +435,7 @@ def mainloop(notify, killer):
                         
                     if current_log_filepath != previous_filepath: #file path changed
                         logging.info('Log file path is: ' + current_log_filepath) #signals to upload thread that data is transfer files, sends the current file through the queue so it gets ignored.
+                        
                         
                     previous_filepath = current_log_filepath
                             
@@ -453,6 +488,10 @@ def mainloop(notify, killer):
                 elif (command == 'set ready_to_upload'):
                     logging.debug('Upload queue is ready for more data')
                     ready_to_upload = True
+                elif (command == 'invalid date'):
+                    if(not invalid_date):
+                        logging.info('Invalid date flag set.')
+                        invalid_date = True
                 elif (command == 'quit'):
                     logging.error('Stopping main thread due to an error.')
                     killer.kill_self()
@@ -496,9 +535,7 @@ def mainloop(notify, killer):
         finally:
             if(pi is not None):
                 logging.info('Closing pigpio socket.')
-                pi.stop()
-        logging.info('Killing pigpiod process.')
-        os.system('killall pigpiod')
+                pi.stop()        
         logging.info('Exiting.')
         systemd_stop(*notify)
         return
