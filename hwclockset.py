@@ -2,7 +2,6 @@ import os
 import time, datetime
 
 def setCenturyAndReboot():
-    #DOES NOT WORK YET, INVESTIGATING SUBPROCESS MODULE IMPLEMENTATION
     print('setCenturyAndReboot - Attempting to set hwclock to current century, then rebooting in order to reinitialize gpsd time estimation.')
     os.system('sudo mount -o remount,rw /')
     os.system('sudo date -s 2014-01-01') #setting the system time to anything in the current century will get the gpsd to work out the time, but keep it less than 2016 so it still fails the validity check

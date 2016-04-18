@@ -48,7 +48,6 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
     Longitude = '0'
     Altitude = '0'
 
-    century_set = False
     first_call = True
     
     last_hwclock_set_time = time.time()
@@ -79,25 +78,18 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                             gps_fix.refresh(new_data)
                             gps_time_str = '{time}'.format(**gps_fix.TPV)
                             if(gps_time_str is not None and not gps_time_str == 'n/a'):
-                                if(timestamp.year < 2016 or first_call or (time.time() - last_hwclock_set_time) >  28800): #set hwclock on first call and then every 8 hours
-                                    if(timestamp.year < 2016):
-                                        print('year < 2016  '+ str(timestamp.year))
-                                    elif first_call:
-                                        print('first call')
-                                    else:
-                                        print('now: ' + str(time.time()) + ', last hw clock set time: ' + str(last_hwclock_set_time) + ', diff: ' + str((time.time() - last_hwclock_set_time)))
-                                        
+                                now = time.time()
+                                
+                                if(timestamp.year < 2016 or first_call or (now - last_hwclock_set_time) >  28800): #set hwclock on first call and then every 8 hours
 
                                     first_call = False
-                                    if(timestamp.year <= 1999 and not century_set):
-                                        logging.debug('setCenturyAndReboot would be called now...')
-                                        #setCenturyAndReboot()
-                                        century_set = True
+                                    if(timestamp.year <= 1999): #the hwclock must have the wrong century so GPSd can't resolve correct time.
+                                        setCenturyAndReboot()
                                     else:
-                                        logging.debug('setHWClock would be called now...')
-                                        #setHWClock(gps_time_str)
-                                        last_hwclock_set_time = time.time()
-                                    break
+                                        setHWClock_thread = threading.Thread(target=setHWClock, args=(gps_time_str,), kwargs={}) #async so won't block
+                                        setHWClock_thread.start()
+                                        last_hwclock_set_time = now
+                                    
                                 Latitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lat'], 'lat', 'RAW')).replace('°','')
                                 Longitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lon'], 'lon', 'RAW')).replace('°','')
                                 Altitude = str(gps_fix.TPV['alt'])
@@ -107,12 +99,12 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     timestamp_str = timestamp.strftime(time_format_str)
                     
                     data_str = timestamp_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + ad1_volts + p.PWM() + r.RPM()
-
-                 
                     
                     if(len(data_str.split(',')) < 9):
                         logging.debug('Invalid serial data recieved, length < 9 after split on , ACTUAL DATA: ' + data)
                         continue
+                    if(timestamp.year < 2016):
+                        logging.debug('Discarding sample with an invalid timestamp (year < 2016)')
 
                     filename = timestamp.strftime("%Y-%m-%d_%H.csv") #change log file every hour
                     main_queue.put(('new data', filename, data_str))
@@ -144,24 +136,22 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
 def keyword_args_to_dict(**kwargs):
     return {k: v for (k,v) in kwargs.items() if v != None}
 
-##def setCenturyAndReboot():
-##    #DOES NOT WORK YET, INVESTIGATING SUBPROCESS MODULE IMPLEMENTATION
-##    logging.info('setCenturyAndReboot - Attempting to set hwclock to current century, then rebooting in order to reinitialize gpsd time estimation.')
-##    os.system('sudo mount -o remount,rw /')
-##    os.system('sudo date -s 2014-01-01') #setting the system time to anything in the current century will get the gpsd to work out the time, but keep it less than 2016 so it still fails the validity check
-##    os.system('sudo hwclock -w') #set hwclock from updated system clock    
-##    logging.info('setCenturyAndReboot - done setting current century, running reboot command...')
-##    os.system('sudo reboot')    
-##
-##def setHWClock(gps_utc_time): #gps time is expected to be YYYY-MM-DDTHH:MM:SS.000Z format.
-##    #DOES NOT WORK YET, INVESTIGATING SUBPROCESS MODULE IMPLEMENTATION
-##    logging.info('setHWClock - Attempting to set hwclock to current gpst time, remounting root in rw.')
-##    os.system('sudo mount -o remount,rw /')
-##    os.system('sudo date -s ' + gps_utc_time)
-##    os.system('sudo hwclock -w') #set hwclock from updated system clock
-##    time.sleep(2)
-##    os.system('sudo mount -o remount,ro /')
-##    logging.info('setHWClock - done setting clock, remounted root as ro.')
+def setCenturyAndReboot():
+    logging.info('setCenturyAndReboot - Attempting to set hwclock to current century, then rebooting in order to reinitialize gpsd time estimation.')
+    os.system('sudo mount -o remount,rw /')
+    os.system('sudo date -s 2014-01-01') #setting the system time to anything in the current century will get the gpsd to work out the time, but keep it less than 2016 so it still fails the validity check
+    os.system('sudo hwclock -w') #set hwclock from updated system clock    
+    logging.info('setCenturyAndReboot - done setting current century, running reboot command...')
+    os.system('sudo reboot -f')
+    
+def setHWClock(gps_utc_time): #gps time is expected to be YYYY-MM-DDTHH:MM:SS.000Z format.
+    logging.info('setHWClock - Attempting to set hwclock to current gpst time, remounting root in rw.')
+    os.system('sudo mount -o remount,rw /')
+    os.system('sudo date -s ' + gps_utc_time)
+    os.system('sudo hwclock -w') #set hwclock from updated system clock
+    time.sleep(5)
+    os.system('sudo mount -o remount,ro /')
+    logging.info('setHWClock - done setting clock, remounted root as ro.')
 
     
     
