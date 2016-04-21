@@ -40,7 +40,7 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
     time_format_str = '%Y-%m-%dT%H:%M:%S.%fZ'
     
     PWM_GPIO = 5
-    RPM_GPIO = 17 #for reference, the ups uses gpio 22 to shutdown the pi (FSSD) and 27 is use for pulse train, 4 is used by the GPS for PPS, STACounter enable on 25
+    RPM_GPIO = 17 #for reference, the ups uses gpio 27 to shutdown the pi (FSSD) and 22 is use for pulse train output to the ups, 4 is used by the GPS for PPS, STACounter enable on 25
     
     led_state = 0
     
@@ -70,8 +70,10 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     if(killer.kill_now): break
                     new_data_event.clear()
                     timestamp = datetime.datetime.utcnow()
-                            
-                    ad1_volts = ',{0:.2f},'.format(float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05),"02x")) / 100.0)
+
+                    #ad1_volts = ',{0:.2f},'.format(float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05), "02x"))/100.0)
+                    ad1_volts = float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05), "02x"))/100.0
+                    pressure = ',{0:.2f},'.format(float(ad1_volts * 125 - 62.5))
                                     
                     for new_data in gps_connection:
                         if new_data:
@@ -98,8 +100,9 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     
                     timestamp_str = timestamp.strftime(time_format_str)
                     
-                    data_str = timestamp_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + ad1_volts + p.PWM() + r.RPM()
-                    
+                    #data_str = timestamp_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + ad1_volts + p.PWM() + r.RPM()
+                    data_str = timestamp_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + pressure + p.PWM() + r.RPM()
+                    print(data_str)
                     if(len(data_str.split(',')) < 9):
                         logging.debug('Invalid serial data recieved, length < 9 after split on , ACTUAL DATA: ' + data)
                         continue
@@ -162,7 +165,8 @@ def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
     url = 'https://api.thingspeak.com/update'
     field_keys = ['field' + str(n) for n in range(1,NUMOFCHANNELS+1)]
     headers = {"Content-type": "application/x-www-form-urlencoded","Accept": "text/plain"}
-    write_key =  'ZHHHO6RTJOAHCAYW'#<--FAI's 'WeirTest' channel #'ODZXE1UNTM1825OX' #<--TREVER'S TEST CHANNEL
+    #write_key =  'ZHHHO6RTJOAHCAYW'#<--FAI's 'WeirTest' channel
+    write_key =  'ODZXE1UNTM1825OX' #<--TREVER'S TEST CHANNEL
     post_interval = 15 #seconds between https posts attempts, thingspeak rate limit is 15 seconds
 
     api_keys = {'key':write_key}

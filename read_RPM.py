@@ -10,7 +10,7 @@ class reader:
    """
    A class to read speedometer pulses and calculate the RPM.
    """
-   def __init__(self, pi, gpio, pulses_per_rev=1.0, weighting=0.0, min_RPM=5.0):
+   def __init__(self, pi, gpio, pulses_per_rev=1.0, weighting=0.5, min_RPM=5.0, max_RPM=1000):
       """
       Instantiate with the Pi and gpio of the RPM signal
       to monitor.
@@ -32,12 +32,23 @@ class reader:
       self.gpio = gpio
       self.pulses_per_rev = pulses_per_rev
 
+ 
+
       if min_RPM > 1000.0:
          min_RPM = 1000.0
       elif min_RPM < 1.0:
          min_RPM = 1.0
 
+      if max_RPM > 100000.0:
+         max_RPM = 100000.0
+      elif max_RPM < 1.0:
+         max_RPM = 1.0
+
       self.min_RPM = min_RPM
+
+      self.max_RPM = max_RPM
+
+      self._min_period = 1000000.0 * (1.0/ ( (float(pulses_per_rev)) * (float(max_RPM) / 60.0))) #microseconds
 
       self._watchdog = 60000/min_RPM # Milliseconds
 
@@ -59,15 +70,21 @@ class reader:
 
    def _cbf(self, gpio, level, tick):
 
+      
+
       if level == 1: # Rising edge.
 
-         if self._high_tick is not None:
-            t = pigpio.tickDiff(self._high_tick, tick)
+         if self._high_tick is not None and tick > self._high_tick:
+            t = pigpio.tickDiff(self._high_tick, tick) #microseconds
+            #print('duration = ' + str(t))
+            #print('min period = ' + str(self._min_period))
+            
 
-            if self._period is not None:
-               self._period = (self._old * self._period) + (self._new * t)
-            else:
-               self._period = t
+            if(t >= self._min_period):
+               if self._period is not None:
+                  self._period = (self._old * self._period) + (self._new * t)
+               else:
+                  self._period = t
 
          self._high_tick = tick
 
@@ -82,6 +99,7 @@ class reader:
       Returns the RPM.
       """
       RPM = 0.0
+      #print("period= " + str(self._period))
       if self._period is not None:
          RPM = 60000000.0 / (self._period * self.pulses_per_rev)
          if RPM < self.min_RPM:
@@ -107,11 +125,15 @@ if __name__ == "__main__":
    SAMPLE_TIME = 2.0
    
    print("RPM GPIO= " + str(RPM_GPIO) + ", RUN_TIME= " + str(RUN_TIME) + ", SAMPLE_TIME= " + str(SAMPLE_TIME))
+
+
    
    pi = pigpio.pi()
 
    p = read_RPM.reader(pi, RPM_GPIO)
 
+   print("min period " + str(p._min_period))
+   
    start = time.time()
 
    while (time.time() - start) < RUN_TIME:
