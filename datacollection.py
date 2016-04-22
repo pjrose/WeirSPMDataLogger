@@ -33,14 +33,11 @@ import gps3_human
 
    
 def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_event):
-    #sample data format:
-    #data                ,lat,  ,lon     ,el    ,press , tem  , level, qual,rpm
-    #2016-03-16T16:15:04Z,32.758,-97.448,199.700,32.808,63.722,26.887,2.144,0.000
-   
+      
     time_format_str = '%Y-%m-%dT%H:%M:%S.%fZ'
     
     PWM_GPIO = 5
-    RPM_GPIO = 17 #for reference, the ups uses gpio 27 to shutdown the pi (FSSD) and 22 is use for pulse train output to the ups, 4 is used by the GPS for PPS, STACounter enable on 25
+    RPM_GPIO = 17 #for reference, the ups uses gpio 27 to shutdown the pi (FSSD input) and 22 is an output used for pulse train output to the ups, 4 is used by the GPS for PPS, STACounter enable is a pull down input on 25
     
     led_state = 0
     
@@ -82,10 +79,12 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     UPS_Pico_run_now = pi.i2c_read_word_data(i2c_handle_69, 0x0e)
                     
                     if(UPS_Pico_run_now == UPS_Pico_run_prior):
-                        raise TimeoutError('The UPS Pico_run register (UPS Pico module status register 69 0x0E) has returend the same value twice, which means the UPS is not running (either shutdown or locked up). Successful reads prior to error: ' + str(UPS_Pico_run_read_count))
+                        logging.error('The UPS Pico_run register (UPS Pico module status register 69 0x0E) has returend the same value twice, which means the UPS is not running (either shutdown or locked up). Successful reads prior to error: ' + str(UPS_Pico_run_read_count) + '. Rebooting.)
+                        time.sleep(2)
+                        os.system('sudo reboot -f')
+                        raise Exception('Exiting DAQ thread, reboot command issued due to UPS Pico failure.')
                     else:
                         UPS_Pico_run_read_count += 1
-                    #print('ups pico_run: ' + str(UPS_Pico_run_now) + ', successful reads: ' + str(UPS_Pico_run_read_count))
                     UPS_Pico_run_prior = UPS_Pico_run_now
                     
                                     
