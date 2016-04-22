@@ -57,6 +57,11 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
 
     gps_connection = connectGPSd()
     
+    setHWClock_thread = None
+
+    UPS_Pico_run_prior = 0 
+    UPS_Pico_run_temp = 0
+    UPS_Pico_run_read_count = 0
 
     
     while not killer.kill_now:
@@ -71,9 +76,18 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     new_data_event.clear()
                     timestamp = datetime.datetime.utcnow()
 
-                    #ad1_volts = ',{0:.2f},'.format(float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05), "02x"))/100.0)
                     ad1_volts = float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05), "02x"))/100.0
                     pressure = ',{0:.2f},'.format(float(ad1_volts * 125 - 62.5))
+
+                    UPS_Pico_run_now = pi.i2c_read_word_data(i2c_handle_69, 0x0e)
+                    
+                    if(UPS_Pico_run_now == UPS_Pico_run_prior):
+                        raise TimeoutError('The UPS Pico_run register (UPS Pico module status register 69 0x0E) has returend the same value twice, which means the UPS is not running (either shutdown or locked up). Successful reads prior to error: ' + str(UPS_Pico_run_read_count))
+                    else:
+                        UPS_Pico_run_read_count += 1
+                    print('ups pico_run: ' + str(UPS_Pico_run_now) + ', successful reads: ' + str(UPS_Pico_run_read_count))
+                    UPS_Pico_run_prior = UPS_Pico_run_now
+                    
                                     
                     for new_data in gps_connection:
                         if new_data:
@@ -83,14 +97,13 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                                 now = time.time()
                                 
                                 if(timestamp.year < 2016 or first_call or (now - last_hwclock_set_time) >  28800): #set hwclock on first call and then every 8 hours
-
-                                    first_call = False
                                     if(timestamp.year <= 1999): #the hwclock must have the wrong century so GPSd can't resolve correct time.
                                         setCenturyAndReboot()
                                     else:
-                                        setHWClock_thread = threading.Thread(target=setHWClock, args=(gps_time_str,), kwargs={}) #async so won't block
-                                        setHWClock_thread.start()
-                                        last_hwclock_set_time = now
+                                        if(setHWClock_thread is None or setHWClock_thread.is_alive() is False):
+                                            setHWClock_thread = threading.Thread(target=setHWClock, args=(gps_time_str,), kwargs={}) #async so won't block
+                                            setHWClock_thread.start()
+                                            last_hwclock_set_time = now
                                     
                                 Latitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lat'], 'lat', 'RAW')).replace('°','')
                                 Longitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lon'], 'lon', 'RAW')).replace('°','')
@@ -100,14 +113,17 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     
                     timestamp_str = timestamp.strftime(time_format_str)
                     
-                    #data_str = timestamp_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + ad1_volts + p.PWM() + r.RPM()
                     data_str = timestamp_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + pressure + p.PWM() + r.RPM()
-                    print(data_str)
+
+                    if(first_call):
+                        first_call = False
+                                           
                     if(len(data_str.split(',')) < 9):
                         logging.debug('Invalid serial data recieved, length < 9 after split on , ACTUAL DATA: ' + data)
                         continue
                     if(timestamp.year < 2016):
                         logging.debug('Discarding sample with an invalid timestamp (year < 2016)')
+                        continue                                           
 
                     filename = timestamp.strftime("%Y-%m-%d_%H.csv") #change log file every hour
                     main_queue.put(('new data', filename, data_str))
