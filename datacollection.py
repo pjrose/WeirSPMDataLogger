@@ -85,7 +85,7 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                         raise TimeoutError('The UPS Pico_run register (UPS Pico module status register 69 0x0E) has returend the same value twice, which means the UPS is not running (either shutdown or locked up). Successful reads prior to error: ' + str(UPS_Pico_run_read_count))
                     else:
                         UPS_Pico_run_read_count += 1
-                    print('ups pico_run: ' + str(UPS_Pico_run_now) + ', successful reads: ' + str(UPS_Pico_run_read_count))
+                    #print('ups pico_run: ' + str(UPS_Pico_run_now) + ', successful reads: ' + str(UPS_Pico_run_read_count))
                     UPS_Pico_run_prior = UPS_Pico_run_now
                     
                                     
