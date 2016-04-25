@@ -379,7 +379,7 @@ sudo nano /etc/modules #Add on a new line
     pps-gpio
 
 
-#edit /etc/default/gpsd
+#edit /etc/default/gpsd, note: GPSD doesn't seem to work with /dev/PPS0 on a read only OS
 # Default settings for the gpsd init script and the hotplug wrapper.
 
 # Start the gpsd daemon automatically at boot time
@@ -393,7 +393,7 @@ USBAUTO="false"
 DEVICES=""
 
 # Other options you want to pass to gpsd
-GPSD_OPTIONS="/dev/ttyAMA0 /dev/pps0"
+GPSD_OPTIONS="/dev/ttyAMA0"
 GPSD_SOCKET="/var/run/gpsd.sock"
 
 sudo pip3 install gps3
@@ -444,5 +444,11 @@ if you see oPPS(0) this indicates source selected, Pulse Per Second (PPS) used a
 ntpq -crv -pn
 #to get borders showing up properly, add "screen bash" in "Connection > SSH > Remote command" in the PuTTY Configuration for my session. 
 
-
+#fix weird 'action 'action 17' suspended, next retry is...' messages in syslog:
+sudo nano /etc/rsyslog.conf
+#comment out last 4 lines
+#daemon.*;mail.*;\
+#       news.err;\
+#       *.=debug;*.=info;\
+#       *.=notice;*.=warn       |/dev/xconsole
 

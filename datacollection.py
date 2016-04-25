@@ -33,11 +33,14 @@ import gps3_human
 
    
 def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_event):
-      
+    #sample data format:
+    #data                ,lat,  ,lon     ,el    ,press , tem  , level, qual,rpm
+    #2016-03-16T16:15:04Z,32.758,-97.448,199.700,32.808,63.722,26.887,2.144,0.000
+   
     time_format_str = '%Y-%m-%dT%H:%M:%S.%fZ'
     
     PWM_GPIO = 5
-    RPM_GPIO = 17 #for reference, the ups uses gpio 27 to shutdown the pi (FSSD input) and 22 is an output used for pulse train output to the ups, 4 is used by the GPS for PPS, STACounter enable is a pull down input on 25
+    RPM_GPIO = 17 #for reference, the ups uses gpio 27 to shutdown the pi (FSSD) and 22 is use for pulse train output to the ups, 4 is used by the GPS for PPS, STACounter enable on 25
     
     led_state = 0
     
@@ -59,6 +62,8 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
     UPS_Pico_run_prior = 0 
     UPS_Pico_run_temp = 0
     UPS_Pico_run_read_count = 0
+    UPS_Pico_run_read_errors = 0
+    UPS_PICO_RUN_MAX_READ_ERRORS = 5
 
     
     while not killer.kill_now:
@@ -79,12 +84,13 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     UPS_Pico_run_now = pi.i2c_read_word_data(i2c_handle_69, 0x0e)
                     
                     if(UPS_Pico_run_now == UPS_Pico_run_prior):
-                        logging.error('The UPS Pico_run register (UPS Pico module status register 69 0x0E) has returend the same value twice, which means the UPS is not running (either shutdown or locked up). Successful reads prior to error: ' + str(UPS_Pico_run_read_count) + '. Rebooting.)
-                        time.sleep(2)
-                        os.system('sudo reboot -f')
-                        raise Exception('Exiting DAQ thread, reboot command issued due to UPS Pico failure.')
+                        UPS_Pico_run_read_errors += 1
+                        if(UPS_Pico_run_read_errors >= UPS_PICO_RUN_MAX_READ_ERRORS):
+                            raise TimeoutError('The UPS Pico_run register (UPS Pico module status register 69 0x0E) has returend the same value (' + str(UPS_Pico_run_now) + ') ' + str(UPS_Pico_run_read_errors) + ' times, which most likely indicates that the UPS is not running (either shutdown or locked up). The number of successful reads prior to error: ' + str(UPS_Pico_run_read_count))
                     else:
+                        UPS_Pico_run_read_errors = 0
                         UPS_Pico_run_read_count += 1
+                    print('ups pico_run: ' + str(UPS_Pico_run_now) + ', successful reads: ' + str(UPS_Pico_run_read_count))
                     UPS_Pico_run_prior = UPS_Pico_run_now
                     
                                     
@@ -316,13 +322,13 @@ def init_logger():
         logger.setLevel(logging.NOTSET)
 
         #create rotating file handler and set level to error
-        TEMP_LOG_PATH = os.path.join('/var/log', 'datacollection.log')
-        handler = logging.handlers.RotatingFileHandler(TEMP_LOG_PATH, maxBytes = 1048576, backupCount = 4)# keep last 5 MB of logs in 1 MB files
-        handler.setLevel(logging.NOTSET)
-        formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logging.debug('/var/log/datacollection.log logging initialized')
+        #TEMP_LOG_PATH = os.path.join('/var/log', 'datacollection.log')
+        #handler = logging.handlers.RotatingFileHandler(TEMP_LOG_PATH, maxBytes = 1048576, backupCount = 4)# keep last 5 MB of logs in 1 MB files
+        #handler.setLevel(logging.NOTSET)
+        #formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+        #handler.setFormatter(formatter)
+        #logger.addHandler(handler)
+        #logging.debug('/var/log/datacollection.log logging initialized')
 
         #create console handler and set level to info
         handler = logging.StreamHandler()
