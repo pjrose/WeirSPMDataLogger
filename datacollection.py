@@ -90,7 +90,7 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     else:
                         UPS_Pico_run_read_errors = 0
                         UPS_Pico_run_read_count += 1
-                    print('ups pico_run: ' + str(UPS_Pico_run_now) + ', successful reads: ' + str(UPS_Pico_run_read_count))
+                    #print('ups pico_run: ' + str(UPS_Pico_run_now) + ', successful reads: ' + str(UPS_Pico_run_read_count))
                     UPS_Pico_run_prior = UPS_Pico_run_now
                     
                                     
