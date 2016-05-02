@@ -25,13 +25,16 @@ sudo nano /etc/dhcpcd.conf
 
 
 
-4. Remove GUI and unnecessary services:
+4. Remove GUI and unnecessary services (loosely based on this: http://petr.io/2015/11/09/read-only-raspberry-pi-with-jessie/)
 
 sudo apt-get remove --purge wolfram-engine triggerhappy cron logrotate dbus dphys-swapfile xserver-common lightdm fake-hwclock cups-common x11-* alsa-base alsa-utils gstreamer1.0-alsa:armhf gstreamer1.0-libav:armhf gstreamer1.0-omx gstreamer1.0-plugins-base:armhf gstreamer1.0-plugins-good:armhf gstreamer1.0-x:armhf
 sudo apt-get clean
 sudo apt-get autoclean
 sudo apt-get autoremove
 sudo apt-get remove python3-serial
+
+# replace log management with busybox, you can read the logs with logread
+apt-get install busybox-syslogd; dpkg --purge rsyslog
 
 sudo apt-get install python3 python3-pip python3-rpi.gpio
 sudo python3 -m pip install pyserial --upgrade
@@ -444,11 +447,11 @@ if you see oPPS(0) this indicates source selected, Pulse Per Second (PPS) used a
 ntpq -crv -pn
 #to get borders showing up properly, add "screen bash" in "Connection > SSH > Remote command" in the PuTTY Configuration for my session. 
 
-#fix weird 'action 'action 17' suspended, next retry is...' messages in syslog:
-sudo nano /etc/rsyslog.conf
-#comment out last 4 lines
-#daemon.*;mail.*;\
-#       news.err;\
-#       *.=debug;*.=info;\
-#       *.=notice;*.=warn       |/dev/xconsole
 
+#be sure to remount / and /boot before running sudo apt-get upgrade
+
+#during an upgrade, config.txt is modified. For pi 3 comptability, bluetooth must be turned off, edit /boot/config.txt, add this at the end of the file.
+dtoverlay=pi3-disable-bt
+
+#then disable the bluetooth modem init service:
+sudo systemctl disable hciuart
