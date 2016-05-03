@@ -18,11 +18,20 @@ sudo nano /etc/dhcpcd.conf
 
 #add these lines to end of file:
 
-	interface eth0
-	static ip_address=192.168.10.1/20
-	static routers=192.168.0.1
-	static domain_name_servers=8.8.8.8 8.8.4.4 2001:558:feed::1 2001:558:feed::2
+interface eth0
+static ip_address=192.168.10.1/20
+static routers=192.168.0.1
+static domain_name_servers=8.8.8.8 8.8.4.4 2001:558:feed::1 2001:558:feed::2
 
+#to try DHCP first and fallback to static on failure, add these lines instead:
+
+profile static_eth0
+static ip_address=192.168.10.1/20
+static routers=192.168.0.1
+static domain_name_servers=8.8.8.8 8.8.4.4 2001:558:feed::1 2001:558:feed::2
+
+interface eth0
+fallback static_eth0
 
 
 4. Remove GUI and unnecessary services (loosely based on this: http://petr.io/2015/11/09/read-only-raspberry-pi-with-jessie/)
