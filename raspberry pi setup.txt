@@ -464,3 +464,9 @@ dtoverlay=pi3-disable-bt
 
 #then disable the bluetooth modem init service:
 sudo systemctl disable hciuart
+
+#to get TO-92 sensor working on the pico
+sudo i2cset -y 1 0x6b 0x00 0x11
+sudo shutdown -h now
+wait until shutdown, then remove power cable, plug cable in again and wait until booted.
+Reset UPSPico by pressing of UPSR button

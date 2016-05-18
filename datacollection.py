@@ -18,7 +18,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
-import pigpio, read_RPM, read_PWM
+import pigpio, read_RPM, read_PWM, picofan
 import os, subprocess, sys, signal, inspect, platform, traceback
 import serial,  serial.tools.list_ports #see https://learn.adafruit.com/arduino-lesson-17-email-sending-movement-detector/installing-python-and-pyserial for install instructions on windows
 import sqlite3
@@ -390,6 +390,8 @@ def mainloop(notify, killer):
             logging.info('STACounter jumper (GPIO 16 to GND) is NOT installed, watchdog is enabled.')
         
         i2c_handle_6b, i2c_handle_69 = open_UPS_i2C_handles(pi)
+
+        pico_fan = picofan.controller(pi, i2c_handle_69, i2c_handle_6b)
                 
         previous_filepath = current_log_filepath = None 
         
@@ -457,7 +459,8 @@ def mainloop(notify, killer):
                     #2. Insert data into the database:
 
                     if(time.time() - last_insert >= update_period):
-                        logging.debug('Inserting data to be uploaded, main_queue size ' + str(main_queue.qsize()) + ', CPU core temp: ' + getCPUTemperature())
+                        logging.info(pico_fan.adjust_fan_speed())
+                        logging.debug('Inserting data to be uploaded, main_queue size ' + str(main_queue.qsize()))
                         last_insert = time.time()
                         c = conn.cursor()
                         c.execute('''INSERT INTO datapoints (datapoint) VALUES (?)''', (message[2],))
