@@ -27,37 +27,22 @@ import socket
 import threading, queue
 import requests
 import logging, logging.handlers
-
-from gps3 import gps3
-import gps3_human
+from GPS_serial import GPS_AdafruitSensor
 
    
 def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_event):
-    #sample data format:
-    #data                ,lat,  ,lon     ,el    ,press , tem  , level, qual,rpm
+    #target data string:
+    #timestamp           ,lat,  ,lon     ,el    ,press , temp , level, qual,rpm
     #2016-03-16T16:15:04Z,32.758,-97.448,199.700,32.808,63.722,26.887,2.144,0.000
    
-    time_format_str = '%Y-%m-%dT%H:%M:%S.%fZ'
-    
+        
     PWM_GPIO = 5
     RPM_GPIO = 17 #for reference, the ups uses gpio 27 to shutdown the pi (FSSD) and 22 is use for pulse train output to the ups, 4 is used by the GPS for PPS, STACounter enable on 25
-    
-    led_state = 0
-    
-    Latitude = '0'
-    Longitude = '0'
-    Altitude = '0'
 
-    first_call = True
-    
-    last_hwclock_set_time = time.time()
+    led_state = 0
     
     r = read_RPM.reader(pi, RPM_GPIO)
     p = read_PWM.reader(pi, PWM_GPIO, new_data_event)
-
-    gps_connection = connectGPSd()
-    
-    setHWClock_thread = None
 
     UPS_Pico_run_prior = 0 
     UPS_Pico_run_temp = 0
@@ -65,24 +50,41 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
     UPS_Pico_run_read_errors = 0
     UPS_PICO_RUN_MAX_READ_ERRORS = 5
 
+    oil_sensor_timeouts = 0
+    OIL_SENSOR_MAX_TIMEOUTS = 3
+    
+    gps_sensor = GPS_AdafruitSensor(interface='/dev/ttyAMA0')
+    time_format_str = '%Y-%m-%dT%H:%M:%SZ'
+    system_clock_set_from_gps = False
     
     while not killer.kill_now:
         try:
             logging.debug('acquire_data process launched...')
-            
-            gps_fix = gps3.Fix()
-    
+
             while not killer.kill_now:
                 if(new_data_event.wait(5)):
-                    if(killer.kill_now): break
+                    oil_sensor_timeouts = 0
+                    if(killer.kill_now):
+                        break
                     new_data_event.clear()
-                    timestamp = datetime.datetime.utcnow()
+                    oil_str = p.PWM()
+                else:
+                    oil_sensor_timeouts += 1
+                    oil_str = p.timeout_response
+                    if(killer.kill_now):
+                        break
+                    elif(oil_sensor_timeouts >= OIL_SENSOR_MAX_TIMEOUTS):
+                        raise TimeoutError('Stopping beceause the oil sensor has timed out on GPIO ' + str(PWM_GPIO))
+
+                    timestamp = gps_sensor.timestamp
 
                     ad1_volts = float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05), "02x"))/100.0
-                    pressure = ',{0:.2f},'.format(float(ad1_volts * 125 - 62.5))
+                    pressure_str = ',{0:.2f},'.format(float(ad1_volts * 125 - 62.5))
+                    rpm_str = r.RPM()
+                    timestamp_str = timestamp.strftime(time_format_str) 
 
                     UPS_Pico_run_now = pi.i2c_read_word_data(i2c_handle_69, 0x0e)
-                    
+
                     if(UPS_Pico_run_now == UPS_Pico_run_prior):
                         UPS_Pico_run_read_errors += 1
                         if(UPS_Pico_run_read_errors >= UPS_PICO_RUN_MAX_READ_ERRORS):
@@ -90,62 +92,34 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     else:
                         UPS_Pico_run_read_errors = 0
                         UPS_Pico_run_read_count += 1
-                    #print('ups pico_run: ' + str(UPS_Pico_run_now) + ', successful reads: ' + str(UPS_Pico_run_read_count))
                     UPS_Pico_run_prior = UPS_Pico_run_now
-                    
-                                    
-                    for new_data in gps_connection:
-                        if new_data:
-                            gps_fix.refresh(new_data)
-                            gps_time_str = '{time}'.format(**gps_fix.TPV)
-                            if(gps_time_str is not None and not gps_time_str == 'n/a'):
-                                now = time.time()
-                                
-                                if(timestamp.year < 2016 or first_call or (now - last_hwclock_set_time) >  28800): #set hwclock on first call and then every 8 hours
-                                    if(timestamp.year <= 1999): #the hwclock must have the wrong century so GPSd can't resolve correct time.
-                                        setCenturyAndReboot()
-                                    else:
-                                        if(setHWClock_thread is None or setHWClock_thread.is_alive() is False):
-                                            setHWClock_thread = threading.Thread(target=setHWClock, args=(gps_time_str,), kwargs={}) #async so won't block
-                                            setHWClock_thread.start()
-                                            last_hwclock_set_time = now
-                                    
-                                Latitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lat'], 'lat', 'RAW')).replace('°','')
-                                Longitude = '{}'.format(gps3_human.sexagesimal(gps_fix.TPV['lon'], 'lon', 'RAW')).replace('°','')
-                                Altitude = str(gps_fix.TPV['alt'])
-                            break
 
                     
-                    timestamp_str = timestamp.strftime(time_format_str)
-                    
-                    data_str = timestamp_str + ',' + Latitude + ',' + Longitude + ',' + Altitude + pressure + p.PWM() + r.RPM()
-
-                    if(first_call):
-                        first_call = False
-                                           
+                    data_str = timestamp_str + gps_sensor.data_str() + pressure_str + oil_str + rpm_str
+                    print(data_str)      
                     if(len(data_str.split(',')) < 9):
-                        logging.debug('Invalid serial data recieved, length < 9 after split on , ACTUAL DATA: ' + data)
+                        logging.debug('Invalid data length, < 9 after split on comma, ACTUAL DATA: ' + data)
                         continue
                     if(timestamp.year < 2016):
-                        logging.debug('Discarding sample with an invalid timestamp (year < 2016)')
-                        continue                                           
+                        logging.debug('Discarding sample with an invalid timestamp: ' + timestamp_str)
+                        continue
+                    else:
+                        if not system_clock_set_from_gps: #only done once at startup
+                            loggin.debug('Setting date according to GPS')
+                            os.system('sudo date -s ' + timestamp_str)
+                            system_clock_set_from_gps = True
 
-                    filename = timestamp.strftime("%Y-%m-%d_%H.csv") #change log file every hour
+                    filename = gps_sensor.timestamp.strftime("%Y-%m-%d_%H.csv") #change log file every hour
                     main_queue.put(('new data', filename, data_str))
 
                     led_state = 1 - led_state
                     pi.i2c_write_byte_data(i2c_handle_6b, 0x0D, led_state) #toggle the red LED to show data is being processed
                     
-                else:
-                    if(not killer.kill_now):
-                        raise TimeoutError('Stopping beceause the oil sensor has not returned any data for 5 seconds on GPIO ' + str(PWM_GPIO))
-                    else:
-                        break
+
         except Exception as ex:
             logging.error('acquire_data: ' + traceback.format_exc())
             main_queue.put(('quit',))
         finally:
-            gps_connection.close()
             logging.debug('DAQ thread caught stop signal.')
             try:
                 pi.i2c_write_byte_data(i2c_handle_6b, 0x0D, 0) #turn off the red LED
@@ -154,31 +128,11 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
             except:
                 pass
             main_queue.put(('DAQ thread stopped',))
-            logging.debug('DAQ thread is exiting.')       
-
-
+            logging.debug('DAQ thread is exiting.')
+    
 def keyword_args_to_dict(**kwargs):
     return {k: v for (k,v) in kwargs.items() if v != None}
 
-def setCenturyAndReboot():
-    logging.info('setCenturyAndReboot - Attempting to set hwclock to current century, then rebooting in order to reinitialize gpsd time estimation.')
-    os.system('sudo mount -o remount,rw /')
-    os.system('sudo date -s 2014-01-01') #setting the system time to anything in the current century will get the gpsd to work out the time, but keep it less than 2016 so it still fails the validity check
-    os.system('sudo hwclock -w') #set hwclock from updated system clock    
-    logging.info('setCenturyAndReboot - done setting current century, running reboot command...')
-    os.system('sudo reboot -f')
-    
-def setHWClock(gps_utc_time): #gps time is expected to be YYYY-MM-DDTHH:MM:SS.000Z format.
-    logging.info('setHWClock - Attempting to set hwclock to current gpst time, remounting root in rw.')
-    os.system('sudo mount -o remount,rw /')
-    os.system('sudo date -s ' + gps_utc_time)
-    os.system('sudo hwclock -w') #set hwclock from updated system clock
-    time.sleep(5)
-    os.system('sudo mount -o remount,ro /')
-    logging.info('setHWClock - done setting clock, remounted root as ro.')
-
-    
-    
 def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
     
     #**********thingspeak configuration*************#
@@ -186,8 +140,8 @@ def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
     url = 'https://api.thingspeak.com/update'
     field_keys = ['field' + str(n) for n in range(1,NUMOFCHANNELS+1)]
     headers = {"Content-type": "application/x-www-form-urlencoded","Accept": "text/plain"}
-    #write_key =  'ZHHHO6RTJOAHCAYW'#<--FAI's 'WeirTest' channel
-    write_key =  'ODZXE1UNTM1825OX' #<--TREVER'S TEST CHANNEL
+    write_key =  'ZHHHO6RTJOAHCAYW'#<--FAI's 'WeirTest' channel
+    #write_key =  'ODZXE1UNTM1825OX' #<--TREVER'S TEST CHANNEL
     post_interval = 15 #seconds between https posts attempts, thingspeak rate limit is 15 seconds
 
     api_keys = {'key':write_key}
@@ -217,7 +171,7 @@ def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
                     logging.debug('Upload process caught stop signal')
                     break
 
-            queue_timeouts = 0 #we didn't timeout!, so reset the counter here.
+            queue_timeouts = 0 #no timeout, so reset the counter here.
             
             row_id = msg[0]
             field_values = msg[1].split(',')
@@ -226,10 +180,9 @@ def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
                 
             if(seconds_since_last_post < post_interval):
                 seconds_to_sleep = post_interval - seconds_since_last_post
-                #logging.debug('Upload thread is going to sleep for ' + '{0:.1f}'.format(seconds_to_sleep) + ' seconds')
-                time.sleep(seconds_to_sleep)
 
-            #logging.debug('Length of field values list: ' + str(len(field_values)))        
+                time.sleep(seconds_to_sleep)
+       
             logging.debug(str(upload_queue.qsize()) + ' items left in upload queue')
             upload_success =  False
             try:
@@ -261,7 +214,6 @@ def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
 
 def get_CSV_Folder_Path():
     script_filename = inspect.getframeinfo(inspect.currentframe()).filename
-#    script_path = os.path.dirname(os.path.abspath(script_filename))
     script_path = '/media/usb0'
     directory = os.path.join(script_path, "CSV_Files")
     if not os.path.exists(directory):
@@ -270,7 +222,6 @@ def get_CSV_Folder_Path():
 
 def get_Event_Log_Folder_Path():
     script_filename = inspect.getframeinfo(inspect.currentframe()).filename
-#    script_path = os.path.dirname(os.path.abspath(script_filename))
     script_path = '/media/usb0'
     directory = os.path.join(script_path, "Eventlogs")
     if not os.path.exists(directory):
@@ -279,15 +230,11 @@ def get_Event_Log_Folder_Path():
 
 def get_Database_File_Path():
     script_filename = inspect.getframeinfo(inspect.currentframe()).filename
-    #script_path = os.path.dirname(os.path.abspath(script_filename))
     script_path = '/media/usb0'    
     directory = os.path.join(script_path, "Database")
     if not os.path.exists(directory):
         os.makedirs(directory)
     return os.path.join(directory, 'db.sqlite')
-
-
-
 
 
 def init_db():
@@ -317,15 +264,6 @@ def init_logger():
     if(logger.handlers is None or len(logger.handlers) == 0): #don't want to register handlers more than once
         logger.setLevel(logging.NOTSET)
 
-        #create rotating file handler and set level to error
-        #TEMP_LOG_PATH = os.path.join('/var/log', 'datacollection.log')
-        #handler = logging.handlers.RotatingFileHandler(TEMP_LOG_PATH, maxBytes = 1048576, backupCount = 4)# keep last 5 MB of logs in 1 MB files
-        #handler.setLevel(logging.NOTSET)
-        #formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-        #handler.setFormatter(formatter)
-        #logger.addHandler(handler)
-        #logging.debug('/var/log/datacollection.log logging initialized')
-
         #create console handler and set level to info
         handler = logging.StreamHandler()
         handler.setLevel(logging.NOTSET)
@@ -333,7 +271,6 @@ def init_logger():
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logging.debug('stdout logging initialized')
-
         
         #create rotating file handler and set level to error
         EVENT_LOG_PATH = os.path.join(get_Event_Log_Folder_Path(), 'log.out')
@@ -343,8 +280,6 @@ def init_logger():
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logging.debug('USB logging initialized')
-
-        
 
 
 class Killer:
@@ -378,7 +313,7 @@ def mainloop(notify, killer):
         pi = connectPiGPIO()
         STACounterEnabled = True
         
-        pi.set_pull_up_down(16, pigpio.PUD_UP) #set to pull up by default so a jumper to ground means enable watchdog.
+        pi.set_pull_up_down(16, pigpio.PUD_UP) #pin 36, set to pull up by default so a jumper to the ground on adjacent pin 34 means disable watchdog.
         if(pi.read(16) == 0):
             logging.info('STACounter jumper (GPIO 16 to GND) is installed, watchdog is disabled.')
             STACounterEnabled = False
@@ -654,30 +589,6 @@ def connectPiGPIO(): #see http://abyz.co.uk/rpi/pigpio/pigpiod.html
             time.sleep(1)
             
     return pi
-
-def connectGPSd():  #http://www.catb.org/gpsd/
-    gps_connection = None 
-    connected = False
-    now = time.time()
-    
-    while not connected:
-        try:
-            gps_connection = gps3.GPSDSocket('127.0.0.1', '2947', 'json', None)
-            if(gps_connection is not None):
-                connected = True
-                logging.info('Successfully connected to gpsd')
-                break
-        except:
-            if(time.time() - begin > 10):
-                raise
-            else:
-                pass
-        if(time.time() - begin > 10):
-            raise EnvironmentError('Pigpiod connection timeout.')
-        else:
-            time.sleep(1)
-            
-    return gps_connection
 
 def open_UPS_i2C_handles(pi): #opening i2c handles to UPS Pico LED and watchdog registers, see http://www.modmypi.com/raspberry-pi/breakout-boards/pi-modules/ups-pico for manual
         i2c_handle_6b = pi.i2c_open(1, 0x6B) #i2c bus 1, register 0x6b

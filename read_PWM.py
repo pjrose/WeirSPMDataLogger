@@ -14,6 +14,9 @@ class reader:
    def __init__(self, pi, gpio, new_data_event):
       self.pi = pi
       self.gpio = gpio
+
+
+      self.timeout_response = "{0:.2f},{1:.2f},{2:.2f}".format(-1,-1,-1)
       self.new_data_event = new_data_event
 
       self._SYNC = 0 
@@ -138,3 +141,36 @@ class reader:
       """
       self.pi.set_watchdog(self.gpio, 0) # cancel watchdog
       self._cb.cancel()
+
+if __name__ == "__main__":
+
+   import time
+   import pigpio
+   import read_PWM
+   import threading
+
+   PWM_GPIO = 17
+   RUN_TIME = 60.0
+   
+   print("PWM GPIO= " + str(PWM_GPIO) + ", RUN_TIME= " + str(RUN_TIME))
+   
+   pi = pigpio.pi()
+
+   new_data_event = threading.Event()
+
+   p = read_PWM.reader(pi, PWM_GPIO, new_data_event)
+   
+   start = time.time()
+
+   while (time.time() - start) < RUN_TIME:
+      if(new_data_event.wait(5)):
+         new_data_event.clear()
+         print('New data from oil sensor: ' + p.PWM())
+      else:
+         print('timeout')
+         
+
+   p.cancel()
+
+   pi.stop()
+

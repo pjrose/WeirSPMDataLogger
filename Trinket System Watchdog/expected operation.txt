@@ -1,0 +1,31 @@
+normal startup
+- ten seconds of bootloader
+- if battery volts are good, power on, wait 30 seconds, then check for "ok" signal from the pi. if "ok" signal does not change for more than 60 seconds, perform power cycle   with UPS reset.
+- if battery volts are bad, wait 100 ms and test the battery voltage again. After several low volt measurements, set power off (should already be off)
+
+unresponsive 60 seconds after power on and 30 second power up delay
+- power off, wait a minute, reset ups, power on, check for "ok" signal after 30 seconds
+
+normal startup with lockup
+- power off, wait a minute, reset ups, power on, check for "ok" signal after 30 seconds
+
+normal startup with lockup, failed reset attempt
+- reset ups without power off, check for "ok" signal after 30 seconds
+
+power removed during startup
+- trinket will lose power, UPS should continue to boot the pi, then shut down
+
+power removed during reset
+- should finish reset sequence then power off
+
+-power momentarily removed (10 seconds or lesS)
+- ups will keep the pi alive after power is removed, the trinket bootloader will begin 10 second countdown, trinket will detect battery is ok,   turn on power switch, and 
+
+battery low during normal 
+- should power off
+
+battery low during reset
+- should finish reset sequence then power off
+
+battery low at startup
+- should not power on
