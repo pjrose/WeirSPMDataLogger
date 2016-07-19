@@ -54,8 +54,19 @@ class controller:
       #degrees c of temperature drop required before change fan speed is reduced
       HYSTERESIS = 5
 
-      ups_TO92_temperature = int('{:02x}'.format(self.pi.i2c_read_byte_data(self.i2c_handle_69, 13)))
-      ups_SOT23_temperature = int('{:02x}'.format(self.pi.i2c_read_byte_data(self.i2c_handle_69, 12)))
+      ups_TO92_temperature = 0
+      ups_SOT23_temperature = 0
+      
+      try:
+         ups_TO92_temperature = int(str(self.pi.i2c_read_byte_data(self.i2c_handle_69, 13)),16) #changed to convert from BCD (hex) to int.
+      except ValueError:
+         pass
+      
+      try:
+         ups_SOT23_temperature = int(str(self.pi.i2c_read_byte_data(self.i2c_handle_69, 12)),16)
+      except ValueError:
+         pass
+      
       core_temperature = self.getCPUTemperature()
 
       if(ups_TO92_temperature == 0):

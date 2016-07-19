@@ -573,7 +573,8 @@ def systemd_status(address, sock, status):
     return sd_message(address, sock, message)
 
 def connectPiGPIO(): #see http://abyz.co.uk/rpi/pigpio/pigpiod.html
-   
+    logging.info('restarting pigpio to reset all handles')
+    os.system('systemctl restart pigpiod')
     pi = None #pigpiod connection
     connected = False
     begin = time.time()

@@ -1,0 +1,5 @@
+Copy the script.sh file to the pi home directory, then do the following.
+sudo chmod u+x ./script.sh (Only needs to be done one time)
+
+to run it:
+sudo ./script.sh
