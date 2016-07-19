@@ -76,44 +76,46 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     elif(oil_sensor_timeouts >= OIL_SENSOR_MAX_TIMEOUTS):
                         raise TimeoutError('Stopping beceause the oil sensor has timed out on GPIO ' + str(PWM_GPIO))
 
-                    timestamp = gps_sensor.timestamp
+                #print('oil str: ' + oil_str)
+                timestamp = gps_sensor.timestamp
 
-                    ad1_volts = float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05), "02x"))/100.0
-                    pressure_str = ',{0:.2f},'.format(float(ad1_volts * 125 - 62.5))
-                    rpm_str = r.RPM()
-                    timestamp_str = timestamp.strftime(time_format_str) 
+                ad1_volts = float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05), "02x"))/100.0
 
-                    UPS_Pico_run_now = pi.i2c_read_word_data(i2c_handle_69, 0x0e)
+                pressure_str = ',{0:.2f},'.format(float(ad1_volts * 125 - 62.5))
+                rpm_str = r.RPM()
+                timestamp_str = timestamp.strftime(time_format_str) 
+                #print(timestamp_str + ' ' +  rpm_str + ' ' + pressure_str) 
+                UPS_Pico_run_now = pi.i2c_read_word_data(i2c_handle_69, 0x0e)
 
-                    if(UPS_Pico_run_now == UPS_Pico_run_prior):
-                        UPS_Pico_run_read_errors += 1
-                        if(UPS_Pico_run_read_errors >= UPS_PICO_RUN_MAX_READ_ERRORS):
-                            raise TimeoutError('The UPS Pico_run register (UPS Pico module status register 69 0x0E) has returend the same value (' + str(UPS_Pico_run_now) + ') ' + str(UPS_Pico_run_read_errors) + ' times, which most likely indicates that the UPS is not running (either shutdown or locked up). The number of successful reads prior to error: ' + str(UPS_Pico_run_read_count))
-                    else:
-                        UPS_Pico_run_read_errors = 0
-                        UPS_Pico_run_read_count += 1
-                    UPS_Pico_run_prior = UPS_Pico_run_now
+                if(UPS_Pico_run_now == UPS_Pico_run_prior):
+                    UPS_Pico_run_read_errors += 1
+                    if(UPS_Pico_run_read_errors >= UPS_PICO_RUN_MAX_READ_ERRORS):
+                        raise TimeoutError('The UPS Pico_run register (UPS Pico module status register 69 0x0E) has returend the same value (' + str(UPS_Pico_run_now) + ') ' + str(UPS_Pico_run_read_errors) + ' times, which most likely indicates that the UPS is not running (either shutdown or locked up). The number of successful reads prior to error: ' + str(UPS_Pico_run_read_count))
+                else:
+                    UPS_Pico_run_read_errors = 0
+                    UPS_Pico_run_read_count += 1
+                UPS_Pico_run_prior = UPS_Pico_run_now
 
-                    
-                    data_str = timestamp_str + gps_sensor.data_str() + pressure_str + oil_str + rpm_str
-                    print(data_str)      
-                    if(len(data_str.split(',')) < 9):
-                        logging.debug('Invalid data length, < 9 after split on comma, ACTUAL DATA: ' + data)
-                        continue
-                    if(timestamp.year < 2016):
-                        logging.debug('Discarding sample with an invalid timestamp: ' + timestamp_str)
-                        continue
-                    else:
-                        if not system_clock_set_from_gps: #only done once at startup
-                            loggin.debug('Setting date according to GPS')
-                            os.system('sudo date -s ' + timestamp_str)
-                            system_clock_set_from_gps = True
+                
+                data_str = timestamp_str + gps_sensor.data_str() + pressure_str + oil_str + rpm_str
+                #print(data_str)      
+                if(len(data_str.split(',')) < 9):
+                    logging.debug('Invalid data length, < 9 after split on comma, ACTUAL DATA: ' + data)
+                    continue
+                if(timestamp.year < 2016):
+                    logging.debug('Discarding sample with an invalid timestamp: ' + timestamp_str)
+                    continue
+                else:
+                    if not system_clock_set_from_gps: #only done once at startup
+                        logging.debug('Setting date according to GPS')
+                        os.system('sudo date -s ' + timestamp_str)
+                        system_clock_set_from_gps = True
 
-                    filename = gps_sensor.timestamp.strftime("%Y-%m-%d_%H.csv") #change log file every hour
-                    main_queue.put(('new data', filename, data_str))
+                filename = gps_sensor.timestamp.strftime("%Y-%m-%d_%H.csv") #change log file every hour
+                main_queue.put(('new data', filename, data_str))
 
-                    led_state = 1 - led_state
-                    pi.i2c_write_byte_data(i2c_handle_6b, 0x0D, led_state) #toggle the red LED to show data is being processed
+                led_state = 1 - led_state
+                pi.i2c_write_byte_data(i2c_handle_6b, 0x0D, led_state) #toggle the red LED to show data is being processed
                     
 
         except Exception as ex:
@@ -140,8 +142,9 @@ def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
     url = 'https://api.thingspeak.com/update'
     field_keys = ['field' + str(n) for n in range(1,NUMOFCHANNELS+1)]
     headers = {"Content-type": "application/x-www-form-urlencoded","Accept": "text/plain"}
-    write_key =  'ZHHHO6RTJOAHCAYW'#<--FAI's 'WeirTest' channel
+    #write_key =  'ZHHHO6RTJOAHCAYW'#<--FAI's 'WeirTest' channel
     #write_key =  'ODZXE1UNTM1825OX' #<--TREVER'S TEST CHANNEL
+    write_key =  '2FTAQWUCH8UILXE0' #<--box 2
     post_interval = 15 #seconds between https posts attempts, thingspeak rate limit is 15 seconds
 
     api_keys = {'key':write_key}
@@ -313,14 +316,19 @@ def mainloop(notify, killer):
         pi = connectPiGPIO()
         STACounterEnabled = True
         
+       
         pi.set_pull_up_down(16, pigpio.PUD_UP) #pin 36, set to pull up by default so a jumper to the ground on adjacent pin 34 means disable watchdog.
+        i2c_handle_6b, i2c_handle_69 = open_UPS_i2C_handles(pi)
+        
         if(pi.read(16) == 0):
             logging.info('STACounter jumper (GPIO 16 to GND) is installed, watchdog is disabled.')
+            pi.i2c_write_byte_data(i2c_handle_6b, 0x08, 0xff) #writing 0xff disables the counter.
             STACounterEnabled = False
         else:
             logging.info('STACounter jumper (GPIO 16 to GND) is NOT installed, watchdog is enabled.')
+            pi.i2c_write_byte_data(i2c_handle_6b, 0x08, 180)
         
-        i2c_handle_6b, i2c_handle_69 = open_UPS_i2C_handles(pi)
+
 
         pico_fan = picofan.controller(pi, i2c_handle_69, i2c_handle_6b)
                 
@@ -353,7 +361,6 @@ def mainloop(notify, killer):
     
         update_period = 60 #seconds between new data points
     
-
         last_insert = time.time() -  update_period; #so that we will always try to post on first call
         db_empty = False #assume there might be some data left in the DB
         ready_to_upload = False
@@ -424,9 +431,10 @@ def mainloop(notify, killer):
                             
                      #4. Update the STAcounter (still alive watchdog) on the UPS Pico over i2c, only if gpio 16 (pin 36) is jumpered to it's adjacent ground pin, the pull up was configured earlier.
                     if(STACounterEnabled):
-                        pi.i2c_write_byte_data(i2c_handle_6b, 0x08, 60) #UPS Pico will initiate a reboot if this line of code is not successfully executed at least once in 60 seconds (it counts down).
+                        pi.i2c_write_byte_data(i2c_handle_6b, 0x08, 180) #UPS Pico will initiate a reboot if this line of code is not successfully executed at least once in 3 minutes (it counts down).
                     if(i2c_handle_6b >= 0):
                         toggle_val = 1 - toggle_val
+                        pi.write(13,toggle_val) #pin 33, connected to trinket watchdog  
                         pi.i2c_write_byte_data(i2c_handle_6b, 0x0C, toggle_val) #toggle the blue LED to visually show we hit the watchdog code
         
                 elif (command == 'sent'): 

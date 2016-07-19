@@ -56,7 +56,7 @@ class GPS_AdafruitSensor:
         self._GPS.write(self.PMTK_SET_NMEA_UPDATE_1HZ)
         self._GPS.write(self.PMTK_SET_BAUD_9600)
         self._GPS.write(self.PMTK_SET_NMEA_OUTPUT_RMCVTGGGA)
-        self.timestamp = datetime(2010,1,1)
+        self.timestamp = datetime(2000,1,1)
         self.alt = 0
         self.lat = 0
         self.lon = 0
@@ -66,20 +66,20 @@ class GPS_AdafruitSensor:
         self.thread.start()
 
     def data_str(self):
-        return ',{0:.2f}'.format(self.lat) + ',{0:.2f}'.format(self.lon) + ',{0:.2f}'.format(self.alt)
+        return ',{0:.3f}'.format(self.lat) + ',{0:.3f}'.format(self.lon) + ',{0:.2f}'.format(self.alt)
 
     def timestamp_str(self):
-        return self.timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+        return self.timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')
          
     def wait_for_sentence(self):
         while (True):
             try:
                 line = self._GPS.readline().decode('utf-8')
                 if line.startswith('$GPRMC'):
-                    #print("Received GPRMC: "+line)
+                    if self.debug: print("Received GPRMC: "+line)
                     self.decode_rmc(line)
                 if line.startswith('$GPGGA'):
-                    #print("Received GPGGA: "+line)
+                    if self.debug: print("Received GPGGA: "+line)
                     self.decode_gga(line)
                 else:
                     continue
@@ -122,7 +122,7 @@ class GPS_AdafruitSensor:
         
             gps_gga['date']='20'+da[9][4:]+'-'+da[9][2:4]+'-'+da[9][0:2]
             gps_gga['utc_time']= da[1][0:2]+':'+da[1][2:4]+':'+da[1][4:6]
-            self.timestamp = datetime.strptime(gps_gga['date'] + ' ' + gps_gga['utc_time'], "%Y-%d-%m %H:%M:%S").date()
+            self.timestamp = datetime.strptime(gps_gga['date'] + ' ' + gps_gga['utc_time'], "%Y-%m-%d %H:%M:%S")
 
             #unused data...
             #gps_gga['lat_dm']=da[3][0:2]+' '+da[3][2:]

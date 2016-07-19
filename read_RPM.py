@@ -64,7 +64,7 @@ class reader:
       self._period = None
 
       pi.set_mode(gpio, pigpio.INPUT)
-
+      pi.set_pull_up_down(gpio, pigpio.PUD_UP)
       self._cb = pi.callback(gpio, pigpio.RISING_EDGE, self._cbf)
       pi.set_watchdog(gpio, self._watchdog)
 

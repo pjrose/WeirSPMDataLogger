@@ -11,7 +11,7 @@ if __name__ == "__main__":
     print("Testing GPS sensor (running 5x with 5s pause)...")
 
     print("Initialising...")
-    gps_sensor = GPS_AdafruitSensor(interface='/dev/ttyAMA0')
+    gps_sensor = GPS_AdafruitSensor(interface='/dev/ttyAMA0', debug = True)
     sleep(2)
     #print("/dev/ttyAMA0")
     

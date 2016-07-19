@@ -149,7 +149,7 @@ if __name__ == "__main__":
    import read_PWM
    import threading
 
-   PWM_GPIO = 17
+   PWM_GPIO = 5
    RUN_TIME = 60.0
    
    print("PWM GPIO= " + str(PWM_GPIO) + ", RUN_TIME= " + str(RUN_TIME))

@@ -1,0 +1,10 @@
+# Connect
+open sftp://pi:Weirspm1@192.168.10.1/ -hostkey=*
+# Change remote directory
+cd /home/pi
+call sudo mount -o remount,rw / 
+put "readme.txt"
+call sudo mount -o remount,ro /
+# Disconnect
+close
+#exit
