@@ -24,7 +24,7 @@ mkdir -p $tempdir
 cd $tempdir
 git clone https://github.com/pjrose/WeirSPMDataLogger.git $tempdir
 rsync -zvha $tempdir $homedir --delete-after
-chown $USER -R $homedir
+chown pi -R $homedir
 chmod -R 755 $homedir
 
 
