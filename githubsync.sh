@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 
+#HOW TO USE:
+#Copy the script.sh file to the pi home directory, then do the following.
+#sudo chmod u+x ./githubsync.sh (Only needs to be done one time)
+
+#to run it:
+#sudo ./githubsync.sh 
+
 tempdir=/home/pi/temp/
 homedir=/home/pi/
 
