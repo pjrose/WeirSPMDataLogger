@@ -12,6 +12,7 @@ homedir=/home/pi/
 
 function cleanup {
 #   rm -rf $tempdir
+   sleep 2
    mount -o remount,ro /
 }
 trap cleanup EXIT
