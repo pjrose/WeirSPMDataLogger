@@ -578,25 +578,22 @@ def connectPiGPIO(): #see http://abyz.co.uk/rpi/pigpio/pigpiod.html
     pi = None #pigpiod connection
     connected = False
     begin = time.time()
-    
+    time.sleep(1) #give it some time to initialize
     while not connected:
         try:
             pi = pigpio.pi() #opens a local connection using defaults to the pigpio daemon we just launched
-            if(pi is not None):
-                connected = True
+            connected = pi.connected
+            if(connected):
                 logging.info('Successfully connected to pigpiod')
-                break
+            else:
+                raise EnvironmentError('Could not connect to pigpiod.');
+            break
         except:
             if(time.time() - begin > 10):
                 raise
             else:
+                time.sleep(1)
                 pass
-            
-        if(time.time() - begin > 10):
-            raise EnvironmentError('Pigpiod connection timeout.')
-        else:
-            time.sleep(1)
-            
     return pi
 
 def open_UPS_i2C_handles(pi): #opening i2c handles to UPS Pico LED and watchdog registers, see http://www.modmypi.com/raspberry-pi/breakout-boards/pi-modules/ups-pico for manual
