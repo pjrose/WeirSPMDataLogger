@@ -1,8 +1,5 @@
 #!/usr/bin/env python
 
-# read_PWM.py
-# Public Domain
-
 import time
 import pigpio # http://abyz.co.uk/rpi/pigpio/python.html
 import threading
@@ -10,130 +7,108 @@ import threading
 class reader:
    """
    A class to read oil sensor PWM signals for temperature, level and quality.
+   Modified on 2-27-2017 by PJR, was designed for a 4 pulse sensor (sync, level, temp, quality?), now only a duty cycle to denote level.
+    
+  Optionally a weighting may be specified.  This is a number
+      between 0 and 1 and indicates how much the old reading
+      affects the new reading.  It defaults to 0 which means
+      the old reading has no effect.  This may be used to
+      smooth the data.   
    """
-   def __init__(self, pi, gpio, new_data_event):
+   def __init__(self, pi, gpio): 
+      weighting = 0
+      if weighting < 0.0:
+         weighting = 0.0
+      elif weighting > 0.99:
+         weighting = 0.99
+
+      self._new = 1.0 - weighting # Weighting for new reading.
+      self._old = weighting       # Weighting for old reading.
+
+      self._high_tick = None
+      self._period = None
+      self._high = None
       self.pi = pi
       self.gpio = gpio
 
 
-      self.timeout_response = "{0:.2f},{1:.2f},{2:.2f}".format(-1,-1,-1)
-      self.new_data_event = new_data_event
+      self._duty_cycle = 0
 
-      self._SYNC = 0 
-      self._OIL_TEMP = 2
-      self._OIL_LEVEL = 4
-      self._OIL_QUALITY = 6
-
-      self._state = 0
-
-      self._sync_f_ticks = 0
-      self._sync_r_ticks = 0
-      self._temp_r_ticks = 0
-      self._temp_f_ticks = 0
-      self._level_r_ticks = 0
-      self._level_f_ticks = 0
-      self._qual_r_ticks = 0
-      self._qual_f_ticks = 0
-
-      self._sync_low_duration = 0
-      self._temp_high_duration = 0
-      self._temp_low_duration = 0
-      self._level_high_duration = 0
-      self._level_low_duration = 0
-      self._qual_high_duration = 0
-      self._avg_period = 0
       self._last_tick = 0
-
-
-      self._temp_c =  0
-      self._temp_f = 0
-      self._oil_level = 0
-      self._quality = 0
-
-          
-      self._temperature_duty_cycle = 0
-      self._level_duty_cycle = 0
-      self._quality_duty_cycle = 0
-
       self._watchdog = 5000 # Milliseconds.
-
       pi.set_mode(gpio, pigpio.INPUT)
 
       self._cb = pi.callback(gpio, pigpio.EITHER_EDGE, self._oil_sensor_callback)
+      pi.set_watchdog(gpio, self._watchdog)
 
    def _oil_sensor_callback(self, gpio, level, tick):
-      
-      if(level == 2):
-         pass #watchdog timeout
-      if(tick < self._last_tick or self._last_tick == 0):
-         self._state = self._SYNC
-      elif(level == 1 and tick - self._last_tick > 150000): #>150 ms must have been a synch pulse, avg period of other pulses is ~116ms
-         self._sync_r_ticks = tick
-         self._sync_low_duration = tick - self._last_tick
-         #print('SYNCED, DURATION = ' + str(self._sync_low_duration))
-         self._state = self._OIL_TEMP
-      elif(self._state == self._OIL_TEMP and level == 0):
-         self._temp_f_ticks = tick
-         self._temp_high_duration = self._temp_f_ticks - self._sync_r_ticks
-      elif(self._state == self._OIL_TEMP and level == 1):
-         self._temp_r_ticks = tick
-         self._temp_low_duration = self._temp_r_ticks - self._temp_f_ticks
-         self._state = self._OIL_LEVEL
-         self._temperature_duty_cycle = self._temp_high_duration / (self._temp_high_duration + self._temp_low_duration)
-         #print('OIL TEMP DUTY CYCLE = ' + str(self._temp_high_duration / (self._temp_high_duration + self._temp_low_duration)))
-      elif(self._state == self._OIL_LEVEL and level == 0):
-         self._level_f_ticks = tick
-         self._level_high_duration = self._level_f_ticks - self._temp_r_ticks
-      elif(self._state == self._OIL_LEVEL and level == 1):
-         self._level_r_ticks = tick
-         self._level_low_duration = self._level_r_ticks - self._level_f_ticks
-         self._state = self._OIL_QUALITY
-         self._level_duty_cycle = self._level_high_duration / (self._level_high_duration + self._level_low_duration)
-         #print('OIL LEVEL DUTY CYCLE = ' + str(self._level_high_duration / (self._level_high_duration + self._level_low_duration)))
-         self._avg_period = ((self._level_high_duration + self._level_low_duration) + (self._temp_high_duration + self._temp_low_duration)) / 2
-      elif(self._state == self._OIL_QUALITY and level == 0):
-         self._sync_f_ticks = tick
-         self._qual_high_duration = self._sync_f_ticks - self._level_r_ticks
-         self._state = self._SYNC
-         self._quality_duty_cycle = self._qual_high_duration / self._avg_period
-         #print('OIL QUALITY DUTY CYCLE = ' + str(self._qual_high_duration / self._avg_period))
 
-         if(self._validate_oil_sensor_readings()):
-            self.new_data_event.set()
+      if level == 1:
+
+         if self._high_tick is not None:
+            t = pigpio.tickDiff(self._high_tick, tick)
+
+            if self._period is not None:
+               self._period = (self._old * self._period) + (self._new * t)
+            else:
+               self._period = t
+
+         self._high_tick = tick
+
+      elif level == 0:
+
+         if self._high_tick is not None:
+            t = pigpio.tickDiff(self._high_tick, tick)
+
+            if self._high is not None:
+               self._high = (self._old * self._high) + (self._new * t)
+            else:
+               self._high = t
+
+      elif level == 2: #watchdog time out
+        self._high = pi.read(gpio)
+        self._period = 1
+
+   def frequency(self):
+      """
+      Returns the PWM frequency.
+      """
+      if self._period is not None:
+         return 1000000.0 / self._period
       else:
-         self._state = self._SYNC
-         
-      self._last_tick = tick
+         return 0.0
+
+   def pulse_width(self):
+      """
+      Returns the PWM pulse width in microseconds.
+      """
+      if self._high is not None:
+         return self._high
+      else:
+         return 0.0
+
+   def getUpdate(self):
+         f = self.frequency()
+         pw = self.pulse_width()
+         dc = self.duty_cycle()
+         return ",{:.2f}".format(dc)
+
+   def getUpdate_debug(self):
+         f = self.frequency()
+         pw = self.pulse_width()
+         dc = self.duty_cycle()
+         return ", oil sensor freq= {:.3f} pulse width (usec)= {} duty cycle= {:.2f}%".format(f, int(pw+0.5), dc)
 
 
-   def _validate_oil_sensor_readings(self):
-     
-      self._temp_c
-      self._temp_f
-      self._oil_level
-      self._quality
-      success = False
-      
-      if( self._temperature_duty_cycle >= .15 <= .85 and \
-          self._level_duty_cycle >= .15 <= .85 and \
-          self._quality_duty_cycle >= .15 <= .85):
+   def duty_cycle(self):
+      """
+      Returns the PWM duty cycle percentage.
+      """
+      if self._high is not None:
+         return 100.0 * self._high / self._period
+      else:
+         return 0.0
 
-          self._temp_c =  (self._temperature_duty_cycle * 333.333333) -106.6666667
-          self._temp_f = ((self._temp_c * 9.0) / 5.0) + 32.0
-          self._oil_level = (self._level_duty_cycle * 133.333333) - 26.6666667
-          self._quality =  (self._quality_duty_cycle * 8.3333) - 0.66667
-        
-          #print("Temperature: {0:.2f} degF, ".format(temp_f) + "Level: {0:.2f} mm, ".format(oil_level) + "Quality (1-6): {0:.2f}".format(quality))
-          success = True
-
-      self._temperature_duty_cycle = 0
-      self._level_duty_cycle = 0 
-      self._quality_duty_cycle = 0
-      
-      return success
-      
-   def PWM(self):
-      return "{0:.2f},{1:.2f},{2:.2f}".format(self._temp_f, self._oil_level, self._quality)
       
    def cancel(self):
       """
@@ -142,35 +117,33 @@ class reader:
       self.pi.set_watchdog(self.gpio, 0) # cancel watchdog
       self._cb.cancel()
 
-if __name__ == "__main__":
+if __name__ == "__main__": #debug test routine if called standalone (not from a parent program)
 
    import time
    import pigpio
    import read_PWM
    import threading
 
-   PWM_GPIO = 5
+   PWM_GPIO = 24 #pin 18
    RUN_TIME = 60.0
    
    print("PWM GPIO= " + str(PWM_GPIO) + ", RUN_TIME= " + str(RUN_TIME))
    
    pi = pigpio.pi()
 
-   new_data_event = threading.Event()
+   pi.set_mode(PWM_GPIO, pigpio.INPUT)
 
-   p = read_PWM.reader(pi, PWM_GPIO, new_data_event)
+   p = read_PWM.reader(pi, PWM_GPIO) 
    
    start = time.time()
 
    while (time.time() - start) < RUN_TIME:
-      if(new_data_event.wait(5)):
-         new_data_event.clear()
-         print('New data from oil sensor: ' + p.PWM())
-      else:
-         print('timeout')
-         
+         time.sleep(5)
+         f = p.frequency()
+         pw = p.pulse_width()
+         dc = p.duty_cycle()
+         print(p.getUpdate_debug())
 
    p.cancel()
-
    pi.stop()
 

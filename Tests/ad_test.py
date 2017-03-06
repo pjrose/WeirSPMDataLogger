@@ -1,6 +1,6 @@
 import pigpio
 
-
+#used to check the analog input functionality on the UPS Pico
 pi = pigpio.pi()
 i2c_handle = pi.i2c_open(1, 0x69)
 try:

@@ -18,7 +18,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
-import pigpio, read_RPM, read_PWM, picofan
+import pigpio, read_RPM, read_PWM, picofan, ADS7828
 import os, subprocess, sys, signal, inspect, platform, traceback
 import serial,  serial.tools.list_ports #see https://learn.adafruit.com/arduino-lesson-17-email-sending-movement-detector/installing-python-and-pyserial for install instructions on windows
 import sqlite3
@@ -30,62 +30,45 @@ import logging, logging.handlers
 from GPS_serial import GPS_AdafruitSensor
 
    
-def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_event):
+def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, i2c_handle_ADS7828, reporting_interval): #new_data_event):
     #target data string:
     #timestamp           ,lat,  ,lon     ,el    ,press , temp , level, qual,rpm
     #2016-03-16T16:15:04Z,32.758,-97.448,199.700,32.808,63.722,26.887,2.144,0.000
    
         
-    PWM_GPIO = 5
-    RPM_GPIO = 17 #for reference, the ups uses gpio 27 to shutdown the pi (FSSD) and 22 is use for pulse train output to the ups, 4 is used by the GPS for PPS, STACounter enable on 25
+    PWM_GPIO = 24 # to pin 18 on pi, mistakenly labeled "5" on rev c of the interface PCB
+    RPM_GPIO = 17 # to pin 11 on the pi. 
+
+    #for reference, the ups uses gpio 27 (pin 13) to shutdown the pi (FSSD) and 22 (pin 15) is use for pulse train output to the ups (watchdog), 4 is used by the GPS PPS output, STACounter enable on 25 (pin 22)
 
     led_state = 0
     
-    r = read_RPM.reader(pi, RPM_GPIO)
-    p = read_PWM.reader(pi, PWM_GPIO, new_data_event)
+    analog_sensors = ADS7828.ADS7828(pi, i2c_handle_ADS7828)
+    oil_sensor = read_PWM.reader(pi, PWM_GPIO)
+    rpm_sensor = read_RPM.reader(pi, RPM_GPIO)
 
     UPS_Pico_run_prior = 0 
     UPS_Pico_run_temp = 0
     UPS_Pico_run_read_count = 0
     UPS_Pico_run_read_errors = 0
     UPS_PICO_RUN_MAX_READ_ERRORS = 5
-
-    oil_sensor_timeouts = 0
-    OIL_SENSOR_MAX_TIMEOUTS = 3
     
+    if(reporting_interval == 0):
+       reporting_interval = 5
     gps_sensor = GPS_AdafruitSensor(interface='/dev/ttyAMA0')
     time_format_str = '%Y-%m-%dT%H:%M:%SZ'
     system_clock_set_from_gps = False
     
+
     while not killer.kill_now:
         try:
             logging.debug('acquire_data process launched...')
 
             while not killer.kill_now:
-                if(new_data_event.wait(5)):
-                    oil_sensor_timeouts = 0
-                    if(killer.kill_now):
-                        break
-                    new_data_event.clear()
-                    oil_str = p.PWM()
-                else:
-                    oil_sensor_timeouts += 1
-                    oil_str = p.timeout_response
-                    if(killer.kill_now):
-                        break
-                    elif(oil_sensor_timeouts >= OIL_SENSOR_MAX_TIMEOUTS):
-                        raise TimeoutError('Stopping beceause the oil sensor has timed out on GPIO ' + str(PWM_GPIO))
 
-                #print('oil str: ' + oil_str)
-                timestamp = gps_sensor.timestamp
 
-                ad1_volts = float(format(pi.i2c_read_word_data(i2c_handle_69, 0x05), "02x"))/100.0
-
-                pressure_str = ',{0:.2f},'.format(float(ad1_volts * 125 - 62.5))
-                rpm_str = r.RPM()
-                timestamp_str = timestamp.strftime(time_format_str) 
-                #print(timestamp_str + ' ' +  rpm_str + ' ' + pressure_str) 
-                UPS_Pico_run_now = pi.i2c_read_word_data(i2c_handle_69, 0x0e)
+                #---------verifying that the Pico UPS is running properly ------------- 
+                UPS_Pico_run_now = pi.i2c_read_word_data(i2c_handle_69, 0x0e) #rolling vale, should change after each read.
 
                 if(UPS_Pico_run_now == UPS_Pico_run_prior):
                     UPS_Pico_run_read_errors += 1
@@ -96,11 +79,24 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
                     UPS_Pico_run_read_count += 1
                 UPS_Pico_run_prior = UPS_Pico_run_now
 
-                
+            
+                time.sleep(reporting_interval)
+
+                #---------begin data colection ------------- 
+                timestamp = gps_sensor.timestamp
+                timestamp_str = timestamp.strftime(time_format_str) 
+
+                pressure_str = analog_sensors.getUpdate()
+                oil_str = oil_sensor.getUpdate()
+                rpm_str = rpm_sensor.getUpdate()
+
+                #---------concatenating, checking minimum number of fields and date validity ------------- 
+                # all of the fields have leading commas.
                 data_str = timestamp_str + gps_sensor.data_str() + pressure_str + oil_str + rpm_str
-                #print(data_str)      
-                if(len(data_str.split(',')) < 9):
-                    logging.debug('Invalid data length, < 9 after split on comma, ACTUAL DATA: ' + data)
+                    
+                
+                if(len(data_str.split(',')) < 10):
+                    logging.debug('Invalid data length, < 10 after split on comma, ACTUAL DATA: ' + data)
                     continue
                 if(timestamp.year < 2016):
                     logging.debug('Discarding sample with an invalid timestamp: ' + timestamp_str)
@@ -113,7 +109,7 @@ def acquire_data(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_
 
                 filename = gps_sensor.timestamp.strftime("%Y-%m-%d_%H.csv") #change log file every hour
                 main_queue.put(('new data', filename, data_str))
-
+                # print(data_str)
                 led_state = 1 - led_state
                 pi.i2c_write_byte_data(i2c_handle_6b, 0x0D, led_state) #toggle the red LED to show data is being processed
                     
@@ -138,13 +134,13 @@ def keyword_args_to_dict(**kwargs):
 def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
     
     #**********thingspeak configuration*************#
-    NUMOFCHANNELS = 5
+    NUMOFCHANNELS = 6
     url = 'https://api.thingspeak.com/update'
     field_keys = ['field' + str(n) for n in range(1,NUMOFCHANNELS+1)]
     headers = {"Content-type": "application/x-www-form-urlencoded","Accept": "text/plain"}
     #write_key =  'ZHHHO6RTJOAHCAYW'#<--FAI's 'WeirTest' channel
     #write_key =  'ODZXE1UNTM1825OX' #<--TREVER'S TEST CHANNEL
-    write_key =  '2FTAQWUCH8UILXE0' #<--box 2
+    write_key =  'BNUIKOFOWYPRJ80I' #<--
     post_interval = 15 #seconds between https posts attempts, thingspeak rate limit is 15 seconds
 
     api_keys = {'key':write_key}
@@ -189,7 +185,7 @@ def upload_data_to_thingspeak(upload_queue, main_queue, db_file_path, killer):
             logging.debug(str(upload_queue.qsize()) + ' items left in upload queue')
             upload_success =  False
             try:
-                data = dict(zip(field_keys, [field_values[4], field_values[5], field_values[6], field_values[7],field_values[8]]))
+                data = dict(zip(field_keys, [field_values[4], field_values[5], field_values[6], field_values[7],field_values[8], field_values[9]]))
                 optional_args = keyword_args_to_dict(created_at = field_values[0], lat=field_values[1], long=field_values[2], elevation=field_values[3])
                 params = dict(data.items() |  api_keys.items() | optional_args.items())
                 thingspeak_reply = session.post(url, params, timeout = 6.1)
@@ -318,7 +314,7 @@ def mainloop(notify, killer):
         
        
         pi.set_pull_up_down(16, pigpio.PUD_UP) #pin 36, set to pull up by default so a jumper to the ground on adjacent pin 34 means disable watchdog.
-        i2c_handle_6b, i2c_handle_69 = open_UPS_i2C_handles(pi)
+        i2c_handle_6b, i2c_handle_69, i2c_handle_ADS7828 = open_UPS_i2C_handles(pi)
         
         if(pi.read(16) == 0):
             logging.info('STACounter jumper (GPIO 16 to GND) is installed, watchdog is disabled.')
@@ -351,9 +347,8 @@ def mainloop(notify, killer):
         a.start()
         upload_thread_running = True
 
-        new_data_event = threading.Event()
-        
-        b = threading.Thread(target=acquire_data, args=(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, new_data_event))
+        reporting_interval_seconds =  5 #seconds
+        b = threading.Thread(target=acquire_data, args=(main_queue, killer, pi, i2c_handle_6b, i2c_handle_69, i2c_handle_ADS7828, reporting_interval_seconds))
         b.daemon = True
         b.start()
         daq_thread_running = True
@@ -470,7 +465,7 @@ def mainloop(notify, killer):
         try:
             if(b is not None):
                 logging.info('Waiting up to 10 seconds for DAQ thread to fully stop.')
-                new_data_event.set() #wake up thread so it checks killer.kill_now flag
+                #new_data_event.set() #wake up thread so it checks killer.kill_now flag
                 b.join(10)
             if(i2c_handle_6b >= 0):
                 logging.info('Turning off blue LED.')
@@ -485,6 +480,10 @@ def mainloop(notify, killer):
                 pass
             try:
                 pi.i2c_close(i2c_handle_69)
+            except:
+                pass
+            try:
+                pi.i2c_close(i2c_handle_ADS7828)
             except:
                 pass
         except:
@@ -597,14 +596,15 @@ def connectPiGPIO(): #see http://abyz.co.uk/rpi/pigpio/pigpiod.html
     return pi
 
 def open_UPS_i2C_handles(pi): #opening i2c handles to UPS Pico LED and watchdog registers, see http://www.modmypi.com/raspberry-pi/breakout-boards/pi-modules/ups-pico for manual
-        i2c_handle_6b = pi.i2c_open(1, 0x6B) #i2c bus 1, register 0x6b
-        i2c_handle_69 = pi.i2c_open(1, 0x69) #i2c bus 1, register 0x69
+        i2c_handle_6b = pi.i2c_open(1, 0x6B) #i2c bus 1, register 0x6b, 
+        i2c_handle_69 = pi.i2c_open(1, 0x69) #i2c bus 1, register 0x69, also analog input on Pico UPS
+        i2c_handle_AD7828 = pi.i2c_open(1, 0x48) #i2c bus 1, 0x48 is the default address of the AD7828
         fw_version = pi.i2c_read_byte_data(i2c_handle_6b, 0x00)
         if(i2c_handle_6b >= 0 and i2c_handle_69 >=0 and int(fw_version) > 0):
             logging.info('Successfully communicated with UPS Pico, firmware version is ' + '{:02x}'.format(fw_version))
-        if(i2c_handle_6b < 0 or i2c_handle_69 < 0):
+        if(i2c_handle_6b < 0 or i2c_handle_69 < 0 or i2c_handle_AD7828 < 0):
             raise Exception('The i2c handles are invalid (<0)')
-        return (i2c_handle_6b, i2c_handle_69)
+        return (i2c_handle_6b, i2c_handle_69, i2c_handle_AD7828)
     
 if __name__ == '__main__':
     

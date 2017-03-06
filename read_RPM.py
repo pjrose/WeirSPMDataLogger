@@ -94,7 +94,7 @@ class reader:
             if self._period < 2000000000:
                self._period += (self._watchdog * 1000)
 
-   def RPM(self):
+   def getUpdate(self):
       """
       Returns the RPM.
       """
@@ -140,9 +140,9 @@ if __name__ == "__main__":
 
       time.sleep(SAMPLE_TIME)
 
-      RPM = p.RPM()
+      RPMstr = p.getUpdate()
      
-      print('RPM= ' + RPM)
+      print('RPM= ' + RPMstr)
 
    p.cancel()
 

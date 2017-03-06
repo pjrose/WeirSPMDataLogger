@@ -1,2 +1,4 @@
+Put jumper on pins 36 and 38 to stop the watchdog from resetting the unit. 
+
 sudo systemctl stop datacollection
 sudo i2cset -y 1 0x6B 8 0xff

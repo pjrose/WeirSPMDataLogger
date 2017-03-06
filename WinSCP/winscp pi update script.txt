@@ -4,8 +4,8 @@ open sftp://pi:Weirspm1@192.168.10.1/ -hostkey=*
 cd /home/pi
 call sudo mount -o remount,rw / 
 #put the file specified 
-put "%1%\readme.txt"
+synchronize remote "%1%"
 call sudo mount -o remount,ro /
 # Disconnect
 close
-#exit
+exit

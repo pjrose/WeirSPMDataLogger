@@ -1,0 +1,105 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{cdb5a34d-1d11-4e70-a8c0-be19e9c73b52}</ProjectGuid>
+    <ProjectHome />
+    <StartupFile>datacollection.py</StartupFile>
+    <SearchPath />
+    <WorkingDirectory>.</WorkingDirectory>
+    <OutputPath>.</OutputPath>
+    <ProjectTypeGuids>{888888a0-9f3d-457c-b088-3a5042f75d52}</ProjectTypeGuids>
+    <LaunchProvider>Standard Python launcher</LaunchProvider>
+    <InterpreterId />
+    <InterpreterVersion />
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'" />
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'" />
+  <PropertyGroup>
+    <VisualStudioVersion Condition=" '$(VisualStudioVersion)' == '' ">10.0</VisualStudioVersion>
+    <PtvsTargetsFile>$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets</PtvsTargetsFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="datacollection.py" />
+    <Compile Include="gps3\gps3-master\agegps3.py" />
+    <Compile Include="gps3\gps3-master\agps3.py" />
+    <Compile Include="gps3\gps3-master\ahuman.py" />
+    <Compile Include="gps3\gps3-master\gegps3.py" />
+    <Compile Include="gps3\gps3-master\gps3.py" />
+    <Compile Include="gps3\gps3-master\human.py" />
+    <Compile Include="gps3\gps3_human.py" />
+    <Compile Include="GPS_serial.py" />
+    <Compile Include="picofan.py" />
+    <Compile Include="picofssd.py" />
+    <Compile Include="PIGPIO\build\lib.linux-armv7l-2.7\pigpio.py" />
+    <Compile Include="PIGPIO\build\lib\pigpio.py" />
+    <Compile Include="PIGPIO\pigpio.py" />
+    <Compile Include="PIGPIO\setup.py" />
+    <Compile Include="PIGPIO\x_pigpio.py" />
+    <Compile Include="read_PWM.py" />
+    <Compile Include="read_RPM.py" />
+    <Compile Include="ADS7828.py" />
+    <Compile Include="Tests\ad7828test.py" />
+    <Compile Include="Tests\ad_test.py" />
+    <Compile Include="Tests\gps3 test.py" />
+    <Compile Include="Tests\gpsdtest.py" />
+    <Compile Include="Tests\hwclockset.py" />
+    <Compile Include="Tests\pitemperature.py" />
+    <Compile Include="Tests\sta_counter_test.py" />
+    <Compile Include="Tests\test_GPS_serial.py" />
+    <Compile Include="UPSPico\picofssd_old.py" />
+    <Compile Include="UPSPico\picofu3.py" />
+    <Compile Include="UPSPico\pico_status.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Setup Notes\Commands to stop the datacollection process and watchdog.txt" />
+    <Content Include="Setup Notes\raspberry pi setup.txt" />
+    <Content Include="TrinketWatchdog\expected operation.txt" />
+    <Content Include="Trunc\To reszie partitoin.txt" />
+    <Content Include="umtskeeper\changelog.txt" />
+    <Content Include="umtskeeper\favicon.ico" />
+    <Content Include="umtskeeper\LICENSE.txt" />
+    <Content Include="umtskeeper\README.html" />
+    <Content Include="umtskeeper\README.txt" />
+    <Content Include="umtskeeper\robots.txt" />
+    <Content Include="umtskeeper\sakis3g-source\dependencies\usb-modeswitch\jim\freebsd\andrew.txt" />
+    <Content Include="umtskeeper\sakis3g-source\dependencies\usb-modeswitch\jim\freebsd\clemens.txt" />
+    <Content Include="umtskeeper\sakis3g-source\dependencies\usb-modeswitch\jim\freebsd\duane.txt" />
+    <Content Include="umtskeeper\sakis3g-source\dependencies\usb-modeswitch\jim\freebsd\oharboe.txt" />
+    <Content Include="umtskeeper\sakis3g-source\dependencies\usb-modeswitch\jim\freebsd\pat.txt" />
+    <Content Include="umtskeeper\sakis3g-source\dependencies\usb-modeswitch\jim\freebsd\salvatore.txt" />
+    <Content Include="umtskeeper\sakis3g-source\dependencies\usb-modeswitch\jim\freebsd\uwe.txt" />
+    <Content Include="umtskeeper\sakis3g-source\files\help.txt" />
+    <Content Include="umtskeeper\sakis3g-source\files\sakis3g.green.png" />
+    <Content Include="umtskeeper\sakis3g-source\files\sakis3g.png" />
+    <Content Include="umtskeeper\sakis3g-source\files\sakis3g.red.png" />
+    <Content Include="umtskeeper\sakis3g-source\files\sakis3g.yellow.png" />
+    <Content Include="umtskeeper\style.css" />
+    <Content Include="WinSCP\winscp pi update script.txt" />
+    <Content Include="WinSCP\WinSCP.ini" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="gps3" />
+    <Folder Include="gps3\gps3-master" />
+    <Folder Include="PIGPIO" />
+    <Folder Include="PIGPIO\build\" />
+    <Folder Include="PIGPIO\build\lib" />
+    <Folder Include="PIGPIO\build\lib.linux-armv7l-2.7" />
+    <Folder Include="Setup Notes" />
+    <Folder Include="Tests" />
+    <Folder Include="TrinketWatchdog" />
+    <Folder Include="Trunc" />
+    <Folder Include="umtskeeper" />
+    <Folder Include="umtskeeper\sakis3g-source\" />
+    <Folder Include="umtskeeper\sakis3g-source\dependencies\" />
+    <Folder Include="umtskeeper\sakis3g-source\dependencies\usb-modeswitch\" />
+    <Folder Include="umtskeeper\sakis3g-source\dependencies\usb-modeswitch\jim\" />
+    <Folder Include="umtskeeper\sakis3g-source\dependencies\usb-modeswitch\jim\freebsd" />
+    <Folder Include="umtskeeper\sakis3g-source\files" />
+    <Folder Include="UPSPico" />
+    <Folder Include="WinSCP" />
+  </ItemGroup>
+  <Import Project="$(PtvsTargetsFile)" Condition="Exists($(PtvsTargetsFile))" />
+  <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" Condition="!Exists($(PtvsTargetsFile))" />
+</Project>
